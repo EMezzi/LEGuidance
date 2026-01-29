@@ -1,0 +1,22 @@
+{
+    "answer_class": {
+        "answer_class": "organization"
+    },
+    "expected_cardinality": "multiple",
+    "target": {
+        "text": "Gold Cup",
+        "type": "other"
+    },
+    "asked_property": "teams in competition",
+    "constraints": [
+        {
+            "kind": "relation",
+            "evidence": "teams in the gold cup",
+            "normalized": "teams participating in the Gold Cup"
+        }
+    ],
+    "time_constraints": [],
+    "aliases": [],
+    "rewritten_question": "Which teams participate in the Gold Cup?",
+    "original_question": "who are the teams in the gold cup"
+}

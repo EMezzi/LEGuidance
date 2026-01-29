@@ -1,0 +1,117 @@
+{
+    "rules": [
+        {
+            "rule_id": "R1_table_lookup",
+            "condition": "IF the question asks for a value that is explicitly stored in a structured record (e.g., drafted in round X, season-by-season division/position, runner-up, schedule result, goalscorer list, career-stat season team, loan end date) and answering requires selecting a specific row/column intersection or filtering by a named field",
+            "predicted_modalities": [
+                "table"
+            ],
+            "linguistic_triggers": [
+                "mentions of structured attributes (round, draft year, season, position/Pos., division, runner-up, schedule/Game site, goalscorers, statistics, loan end date)",
+                "requires filtering/sorting within a roster, draft list, match schedule, standings, or stats grid"
+            ],
+            "rationale": "The needed entity/value is not reliably inferable from general knowledge or prose alone; it must be retrieved from the dataset\u2019s structured table.",
+            "example_questions": [
+                "Who was drafted in round seven of the 1989 NHL Entry Draft by the Los Angeles Kings?",
+                "In what division was RC Valencia relegated (season-by-season)?"
+            ]
+        },
+        {
+            "rule_id": "R2_text_biographical_fact",
+            "condition": "IF the question is a general encyclopedic/biographical fact that can be answered from narrative text sources without needing to inspect a specific image or perform table cell lookup (e.g., who plays a role, where someone lived, what sport someone played, define/identify a known story)",
+            "predicted_modalities": [
+                "text"
+            ],
+            "linguistic_triggers": [
+                "WH-questions about roles/actors, locations lived, occupations/sports played, general cultural/encyclopedic prompts",
+                "no reference to posters/logos/flags/colors/shapes; no requirement to filter a table by dataset-specific fields"
+            ],
+            "rationale": "These are conventional factual questions answerable from text descriptions/knowledge bases; no visual evidence or structured-table retrieval is essential.",
+            "example_questions": [
+                "who plays russ cargill in the simpsons movie",
+                "where did beethoven live most of his life"
+            ]
+        },
+        {
+            "rule_id": "R3_image_visual_attributes",
+            "condition": "IF the question asks about perceptual/visual properties that require seeing an image (colors, shapes, clothing, background color, what is depicted in a crest/logo/flag/poster, number of people shown, objects in someone\u2019s ear, hair appearance)",
+            "predicted_modalities": [
+                "image"
+            ],
+            "linguistic_triggers": [
+                "visual attribute query: color, shape, background, wearing, looks like, features/depicts/shows",
+                "references to poster, logo, crest, flag, jersey, photo/portrait, person\u2019s appearance"
+            ],
+            "rationale": "Visual attributes and depicted elements cannot be reliably derived from text alone; they require inspection of the image.",
+            "example_questions": [
+                "What color jacket is David Bowie wearing?",
+                "Of the towns..., which has a crest that features a fish?"
+            ]
+        },
+        {
+            "rule_id": "R4_table_plus_text_cross_reference",
+            "condition": "IF the question requires (a) identifying an entity via a table (credits/filmography/season/career stats/schedule/draft) AND (b) using external narrative context to answer a second hop (e.g., where a show is set/based, whether a series has a certain season, additional biographical linkage, historical/record fact like 'won most super bowls in a row')",
+            "predicted_modalities": [
+                "table",
+                "text"
+            ],
+            "linguistic_triggers": [
+                "two-hop composition: table retrieval followed by a descriptive fact not contained in the same table",
+                "phrases like 'the show/movie in which [person] played [role]' then asks setting/based/exists?",
+                "requires linking table entity to a textual attribute (setting, based in, production context, historical record)"
+            ],
+            "rationale": "The table is needed to identify the correct work/row, while the final requested attribute is only reliably available in prose text.",
+            "example_questions": [
+                "Where was the movie or television show in which Zachary Abel played the role of Todd based?",
+                "Where does the show take place in which Katie Silverman is Young Jess?"
+            ]
+        },
+        {
+            "rule_id": "R5_image_plus_table_filter_by_visual",
+            "condition": "IF the question requires using a table to enumerate/filter candidate entities (e.g., discography/works list, match list, statistics table) AND using an image to apply a visual constraint (poster shows two people alone, logo with four-leaf clover/man holding a sword, player identified by hair, jersey color) to select the correct row/candidate",
+            "predicted_modalities": [
+                "image",
+                "table"
+            ],
+            "linguistic_triggers": [
+                "visual constraint used as a filter over table entries",
+                "mentions of poster/logo plus a second requirement like 'which of the movies/teams/players in [table] that ...'",
+                "requires identifying which row matches an image property"
+            ],
+            "rationale": "The table provides the candidate set and associated fields; the decisive constraint depends on visual inspection, so neither modality alone suffices.",
+            "example_questions": [
+                "Which movie poster shows two people by themselves... (from discography notable works)?",
+                "What was the result when the team with a four-leaf clover logo opposed Kilmarnock...?"
+            ]
+        },
+        {
+            "rule_id": "R6_image_plus_text_visual_entity_then_fact",
+            "condition": "IF the question requires identifying a country/team/person via an image property (e.g., flag pattern, object in photo, ball panel shape) AND then answering a non-visual factual query about that identified entity (e.g., date of agreement, contextual/historical fact) from text",
+            "predicted_modalities": [
+                "image",
+                "text"
+            ],
+            "linguistic_triggers": [
+                "image-based identification (flag with stripes, object shown) followed by a factual question (when/where/what event)",
+                "multi-hop where the first hop is visual recognition and the second hop is textual knowledge"
+            ],
+            "rationale": "The image is needed to determine the referenced entity; text is needed for the factual attribute/event not contained in the image alone.",
+            "example_questions": [
+                "When did the USSR agree to unify the country with three horizontal stripes on its flag...?",
+                "What geometric shape on the soccer ball? (when framed as needing the depicted ball + sport context)"
+            ]
+        }
+    ],
+    "fallback_rule": {
+        "rule_id": "F1_default_text",
+        "condition": "IF none of the above high-precision conditions match",
+        "predicted_modalities": [
+            "text"
+        ],
+        "linguistic_triggers": [
+            "no clear visual-attribute requirement; no clear table-lookup requirement"
+        ],
+        "rationale": "Absent strong evidence that visual inspection or structured-table retrieval is necessary, assume the question is answerable from text sources.",
+        "example_questions": null
+    }
+}

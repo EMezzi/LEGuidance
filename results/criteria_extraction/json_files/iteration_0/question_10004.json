@@ -1,0 +1,27 @@
+{
+    "answer_class": {
+        "answer_class": "person"
+    },
+    "expected_cardinality": "single",
+    "target": {
+        "text": "How I Met Your Mother",
+        "type": "title"
+    },
+    "asked_property": "narrator",
+    "constraints": [
+        {
+            "kind": "role",
+            "evidence": "the narrator",
+            "normalized": "narrator role"
+        }
+    ],
+    "time_constraints": [],
+    "aliases": [
+        {
+            "text": "how i met your mother",
+            "reason": "same title with different capitalization"
+        }
+    ],
+    "rewritten_question": "Who is the narrator of How I Met Your Mother?",
+    "original_question": "who is the narrator on how i met your mother"
+}

@@ -1,0 +1,36 @@
+{
+    "answer_class": {
+        "answer_class": "other"
+    },
+    "expected_cardinality": "single",
+    "target": {
+        "text": "R. Macchio TV title card",
+        "type": "other"
+    },
+    "asked_property": "kind of tree seen",
+    "constraints": [
+        {
+            "kind": "relation",
+            "evidence": "TV title card",
+            "normalized": "TV title card"
+        },
+        {
+            "kind": "role",
+            "evidence": "where he played D. LaRusso",
+            "normalized": "R. Macchio played D. LaRusso"
+        }
+    ],
+    "time_constraints": [],
+    "aliases": [
+        {
+            "text": "R. Macchio",
+            "reason": "Abbreviated name with initial; likely refers to the same person as a fuller name not given in the question."
+        },
+        {
+            "text": "D. LaRusso",
+            "reason": "Abbreviated character name with initial; likely refers to the same character as a fuller name not given in the question."
+        }
+    ],
+    "rewritten_question": "What kind of tree is visible in the TV title card featuring R. Macchio playing D. LaRusso?",
+    "original_question": "What kind of tree can be seen in the R. Macchio TV title card where he played D. LaRusso?"
+}

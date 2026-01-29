@@ -1,0 +1,45 @@
+{
+    "answer_class": {
+        "answer_class": "other"
+    },
+    "expected_cardinality": "single",
+    "target": {
+        "text": "Cheryl D. Mills",
+        "type": "person"
+    },
+    "asked_property": "election event in which Hillary Clinton was a Democratic Party candidate for President",
+    "constraints": [
+        {
+            "kind": "relation",
+            "evidence": "served as Senior Adviser and Counsel for Hillary Clinton's 2008 presidential campaign",
+            "normalized": "served as Senior Adviser and Counsel for Hillary Clinton's 2008 presidential campaign"
+        },
+        {
+            "kind": "relation",
+            "evidence": "member of Hillary Clinton's group of core advisers, self-designated as \"Hillaryland\"",
+            "normalized": "member of Hillary Clinton's core advisers group \"Hillaryland\""
+        },
+        {
+            "kind": "role",
+            "evidence": "as United States Senator",
+            "normalized": "Hillary Clinton role: United States Senator"
+        },
+        {
+            "kind": "qualifier",
+            "evidence": "one of the Democratic Party candidates for President",
+            "normalized": "Hillary Clinton was a Democratic Party candidate for President"
+        }
+    ],
+    "time_constraints": [
+        {
+            "label": "2008 presidential campaign",
+            "start_year": 2008,
+            "end_year": 2008,
+            "start_date": null,
+            "end_date": null
+        }
+    ],
+    "aliases": [],
+    "rewritten_question": "In which election event was Hillary Clinton, as a United States Senator, one of the Democratic Party candidates for President?",
+    "original_question": "Cheryl D. Mills (born 1965) is an American lawyer and corporate executive, she has served as Senior Adviser and Counsel for Hillary Clinton's 2008 presidential campaign, and is considered a member of Hillary Clinton's group of core advisers, self-designated as \"Hillaryland\", the self-designated name of a group of core advisors to Hillary Clinton, when she was First Lady of the United States and again when, as United States Senator, she was one of the Democratic Party candidates for President, in which election event?"
+}

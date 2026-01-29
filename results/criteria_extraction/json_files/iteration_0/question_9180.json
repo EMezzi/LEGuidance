@@ -1,0 +1,22 @@
+{
+    "answer_class": {
+        "answer_class": "year"
+    },
+    "expected_cardinality": "single",
+    "target": {
+        "text": "Troy Grosenick",
+        "type": "person"
+    },
+    "asked_property": "year won award",
+    "constraints": [
+        {
+            "kind": "award",
+            "evidence": "win the Aldege \"Baz\" Bastien Memorial Award",
+            "normalized": "won the Aldege \"Baz\" Bastien Memorial Award"
+        }
+    ],
+    "time_constraints": [],
+    "aliases": [],
+    "rewritten_question": "In what year did Troy Grosenick win the Aldege \"Baz\" Bastien Memorial Award?",
+    "original_question": "What year did Troy Grosenick win the Aldege \"Baz\" Bastien Memorial Award?"
+}

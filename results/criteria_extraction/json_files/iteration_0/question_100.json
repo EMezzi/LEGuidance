@@ -1,0 +1,45 @@
+{
+    "answer_class": {
+        "answer_class": "person"
+    },
+    "expected_cardinality": "single",
+    "target": {
+        "text": "player",
+        "type": "person"
+    },
+    "asked_property": "player transferred to Warrington Wolves",
+    "constraints": [
+        {
+            "kind": "relation",
+            "evidence": "was transferred from the team that has crossed swords on its logo to the Warrington Wolves",
+            "normalized": "transferred from a team with crossed swords on its logo to Warrington Wolves"
+        },
+        {
+            "kind": "relation",
+            "evidence": "to the Warrington Wolves",
+            "normalized": "to Warrington Wolves"
+        },
+        {
+            "kind": "qualifier",
+            "evidence": "the team that has crossed swords on its logo",
+            "normalized": "origin team identified by crossed swords logo"
+        },
+        {
+            "kind": "season",
+            "evidence": "in the 2018 season",
+            "normalized": "during the 2018 season"
+        }
+    ],
+    "time_constraints": [
+        {
+            "label": "2018 season",
+            "start_year": 2018,
+            "end_year": 2018,
+            "start_date": null,
+            "end_date": null
+        }
+    ],
+    "aliases": [],
+    "rewritten_question": "Which player was transferred to the Warrington Wolves from the team whose logo has crossed swords during the 2018 season?",
+    "original_question": "What player was transferred from the team that has crossed swords on its logo to the Warrington Wolves in the 2018 season?"
+}

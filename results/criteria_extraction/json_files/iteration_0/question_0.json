@@ -1,0 +1,22 @@
+{
+    "answer_class": {
+        "answer_class": "year"
+    },
+    "expected_cardinality": "single",
+    "target": {
+        "text": "Elizabeth Matory",
+        "type": "person"
+    },
+    "asked_property": "year was opponent of",
+    "constraints": [
+        {
+            "kind": "relation",
+            "evidence": "the opponent of Charles Albert Ruppersberger",
+            "normalized": "opponent of Charles Albert Ruppersberger"
+        }
+    ],
+    "time_constraints": [],
+    "aliases": [],
+    "rewritten_question": "In what year was Elizabeth Matory the opponent of Charles Albert Ruppersberger?",
+    "original_question": "What year was Elizabeth Matory the opponent of Charles Albert Ruppersberger?"
+}

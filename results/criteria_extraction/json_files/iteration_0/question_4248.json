@@ -1,0 +1,40 @@
+{
+    "answer_class": {
+        "answer_class": "organization"
+    },
+    "expected_cardinality": "single",
+    "target": {
+        "text": "Kiyan Soltanpour",
+        "type": "person"
+    },
+    "asked_property": "team played for",
+    "constraints": [
+        {
+            "kind": "league",
+            "evidence": "Regionalliga division",
+            "normalized": "Regionalliga division"
+        },
+        {
+            "kind": "season",
+            "evidence": "during the 2014-15 season",
+            "normalized": "2014-15 season"
+        },
+        {
+            "kind": "domain",
+            "evidence": "career statistics",
+            "normalized": "career statistics"
+        }
+    ],
+    "time_constraints": [
+        {
+            "label": "2014-15 season",
+            "start_year": 2014,
+            "end_year": 2015,
+            "start_date": null,
+            "end_date": null
+        }
+    ],
+    "aliases": [],
+    "rewritten_question": "Which team did Kiyan Soltanpour play for in the Regionalliga division during the 2014-15 season?",
+    "original_question": "When looking at Kiyan Soltanpour's career statistics, what was the team that he played for in the Regionalliga division during the 2014-15 season?"
+}

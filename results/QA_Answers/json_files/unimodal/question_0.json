@@ -1,0 +1,46 @@
+{
+    "unimodal": {
+        "image": {
+            "Elizabeth Matory": [
+                {
+                    "image": "image_0.json",
+                    "answer": "no"
+                },
+                {
+                    "image": "image_1.json",
+                    "answer": "no"
+                }
+            ],
+            "year was opponent of": [
+                {
+                    "image": "image_0.json",
+                    "answer": "no"
+                },
+                {
+                    "image": "image_1.json",
+                    "answer": "no"
+                }
+            ],
+            "the opponent of Charles Albert Ruppersberger": [
+                {
+                    "image": "image_0.json",
+                    "answer": "no"
+                },
+                {
+                    "image": "image_1.json",
+                    "answer": "no"
+                }
+            ]
+        },
+        "text": {
+            "Elizabeth Matory": [],
+            "year was opponent of": [],
+            "the opponent of Charles Albert Ruppersberger": []
+        },
+        "tables": {
+            "Elizabeth Matory": [],
+            "year was opponent of": [],
+            "the opponent of Charles Albert Ruppersberger": []
+        }
+    }
+}
