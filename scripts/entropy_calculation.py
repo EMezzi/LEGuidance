@@ -7,7 +7,7 @@ import base64
 from openai import OpenAI
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import List
 
 
 class AnswerContainsCriteria(BaseModel):
@@ -146,6 +146,7 @@ class Agent:
         return answer_set_text
 
     def create_table_set(self, question_data, all_data_table):
+
         print("Create table set")
         if isinstance(question_data["table_id"], str):
             tables = [question_data["table_id"]]
@@ -177,6 +178,8 @@ class Agent:
         return answer_set_tables
 
     def analyse_image(self, criteria, metadata, image64):
+        """This method checks whether an image can be separated from the others based on a specific criteria."""
+
         response = self.client.responses.parse(
             model="gpt-5.2",
             input=[
@@ -207,6 +210,8 @@ class Agent:
         return found.answer
 
     def analyse_text(self, criteria, paragraph, metadata):
+        """This method checks whether a text can be separated from the others based on a specific criteria."""
+
         response = self.client.responses.parse(
             model="gpt-5.2",
             input=[
@@ -231,6 +236,7 @@ class Agent:
         return found.answer
 
     def table_general_understanding(self, metadata, columns):
+
         response = self.client.responses.parse(
             model="gpt-5.2",
             input=[
@@ -258,6 +264,8 @@ class Agent:
         return found.description
 
     def analyse_table_row(self, criteria, row, metadata, description):
+        """This method checks whether a table row can be separated from the others based on a specific criteria."""
+
         response = self.client.responses.parse(
             model="gpt-5.2",
             input=[
@@ -314,6 +322,7 @@ class Agent:
         return found.answer_set
 
     def decide_modality(self, question):
+        """This method decides the modality from which to start."""
 
         rules_json = json.load(
             open("/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/extracted_rules/initialization_rules.json",
@@ -392,8 +401,81 @@ class Agent:
             if rule_id in rule:
                 return rule[rule_id]["predicted_modalities"]
 
+    def fill_criteria_images(self, criterias, question_files, partitions):
+        """This method checks whether the splitting is possible for each criteria for images."""
+
+        for criteria in criterias:
+            print("Current criteria is: ", criteria)
+            correct_elements = []
+            image_set = question_files['image_set']
+            for image in image_set:
+                metadata = image["title"]
+                image_base64 = encode_image(
+                    os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
+                                 image["path"]))
+                answer = self.analyse_image(criteria, metadata, image_base64)
+                if answer.lower() == "yes":
+                    correct_elements.append(image)
+
+            partition = self.create_partition(image_set, correct_elements, criteria)
+            partitions["image"].append(partition)
+
+    def fill_criteria_text(self, criterias, question_files, partitions):
+        """This method checks whether the splitting is possible for each criteria for texts."""
+
+        for criteria in criterias:
+            print("Current criteria is: ", criteria)
+            correct_elements = []
+            text_set = question_files['text_set']
+            print("The text set is: ", text_set)
+            for text in text_set:
+                print("The text is: ", text)
+                metadata = text["title"]
+                answer = self.analyse_text(criteria, text["text"], metadata)
+
+                if answer.lower() == "yes":
+                    correct_elements.append(text)
+
+            partition = self.create_partition(text_set, correct_elements, criteria)
+            partitions["text"].append(partition)
+
+    def fill_criteria_table(self, criterias, question_files, table_dir, answer_class, partitions):
+        """This method checks whether the splitting is possible for each criteria for table rows."""
+        table_set = question_files["table_set"]
+        table = table_set[0].copy()
+
+        entire_table = json.load(open(os.path.join(table_dir, table['json']), 'rb'))
+        title = entire_table['title']
+        table_columns = [element["column_name"] for element in entire_table["table"]["header"]]
+        rows = table[list(table.keys())[0]]
+
+        table_description = self.table_general_understanding(title, table_columns)
+
+        answer_set_table = self.create_answer_set(answer_class, "table_rows", rows)
+        print("The answer set is: ", answer_set_table)
+
+        for criteria in criterias:
+            print("Current criteria is: ", criteria)
+            correct_elements = []
+
+            for row in rows:
+                answer = self.analyse_table_row(criteria, row, title, table_description)
+                if answer.lower() == "yes":
+                    correct_elements.append(row)
+
+            partition = self.create_partition(rows, correct_elements, criteria)
+
+            partitions["table"].append(partition)
+
+            filling = partition['splitting']['filling']
+            not_filling = partition['splitting']['not_filling']
+
+            print(partition['splitting']['filling'], len(filling))
+            print(partition['splitting']['not_filling'], len(not_filling))
+
     def fill_criterias(self, question: str, question_data: dict, question_files: dict,
                        image_dir: str, text_dir: str, table_dir: str, modalities: list, starting_modality: str):
+        """This method checks whether images, text, and table rows, can be split based on the distinction criterias."""
 
         answer_set_image, answer_set_text, answer_set_table = [], [], []
 
@@ -408,71 +490,13 @@ class Agent:
         # modality to answer it (single one of fusion)
         # Check weather the additional modality is noise
         if starting_modality == "image":
-            for criteria in criterias:
-                print("Current criteria is: ", criteria)
-                correct_elements = []
-                image_set = question_files['image_set']
-                for image in image_set:
-                    metadata = image["title"]
-                    image_base64 = encode_image(
-                        os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                                     image["path"]))
-                    answer = self.analyse_image(criteria, metadata, image_base64)
-                    if answer.lower() == "yes":
-                        correct_elements.append(image)
-
-                partition = self.create_partition(image_set, correct_elements, criteria)
-                partitions["image"].append(partition)
+            self.fill_criteria_images(criterias, question_files, partitions)
 
         elif starting_modality == "text":
-            for criteria in criterias:
-                print("Current criteria is: ", criteria)
-                correct_elements = []
-                text_set = question_files['text_set']
-                print("The text set is: ", text_set)
-                for text in text_set:
-                    print("The text is: ", text)
-                    metadata = text["title"]
-                    answer = self.analyse_text(criteria, text["text"], metadata)
-
-                    if answer.lower() == "yes":
-                        correct_elements.append(text)
-
-                partition = self.create_partition(text_set, correct_elements, criteria)
-                partitions["text"].append(partition)
+            self.fill_criteria_text(criterias, question_files, partitions)
 
         elif starting_modality == "table":
-            table_set = question_files["table_set"]
-            table = table_set[0].copy()
-
-            entire_table = json.load(open(os.path.join(table_dir, table['json']), 'rb'))
-            title = entire_table['title']
-            table_columns = [element["column_name"] for element in entire_table["table"]["header"]]
-            rows = table[list(table.keys())[0]]
-
-            table_description = self.table_general_understanding(title, table_columns)
-
-            answer_set_table = self.create_answer_set(answer_class, "table_rows", rows)
-            print("The answer set is: ", answer_set_table)
-
-            for criteria in criterias:
-                print("Current criteria is: ", criteria)
-                correct_elements = []
-
-                for row in rows:
-                    answer = self.analyse_table_row(criteria, row, title, table_description)
-                    if answer.lower() == "yes":
-                        correct_elements.append(row)
-
-                partition = self.create_partition(rows, correct_elements, criteria)
-
-                partitions["table"].append(partition)
-
-                filling = partition['splitting']['filling']
-                not_filling = partition['splitting']['not_filling']
-
-                print(partition['splitting']['filling'], len(filling))
-                print(partition['splitting']['not_filling'], len(not_filling))
+            self.fill_criteria_table(criterias, question_files, table_dir, answer_class, partitions)
 
         # Check the partition with the lowest logical entropy (le > 0 and le < 1)
         with open("/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/partitions_created/partitions.json",
@@ -482,6 +506,7 @@ class Agent:
         return answer_class, answer_set_image, answer_set_text, answer_set_table
 
     def create_partition(self, all_data, selected_data, criteria):
+        """This method creates the partition."""
 
         not_filling = [item for item in all_data if item not in selected_data]
 
@@ -492,6 +517,7 @@ class Agent:
         return partition
 
     def logical_entropy(self, partition):
+        """This method calculates the logical entropy, which depends on how the elements were split."""
         if len(partition) == 1:
             le = 1
         else:
@@ -505,6 +531,8 @@ class Agent:
         return le if le > 0 or le < 1 else 1
 
     def return_final_answer(self, answer_class, answer_set_image, answer_set_text, answer_set_table):
+        """This method allows to retrieve the final answer. It receives in input the answer_class,
+        and the answer_sets."""
         answer_sets = {"image": answer_set_image, "text": answer_set_text, "table": answer_set_table}
 
         partitions = json.load(open(
@@ -560,26 +588,32 @@ class Agent:
 
     def answer_question(self, question, question_data, question_files, image_dir, text_dir, table_dir, answer_dir,
                         modalities):
+        """Method which calls the other methods to calculate the final answer."""
 
         print("Let's answer the question")
         print(question_data)
 
         # Starting modality: here we select the modality with which to start. The starting modality can also be the
         # finishing modality.
-        starting_modality = self.decide_modality(question)
-        print(starting_modality)
+        modalities_to_try = ["image", "text", "table"]
+        modality = self.decide_modality(question)
+        print(modality)
+        modalities_to_try.remove(modality)
 
-        answer_class, answer_set_image, answer_set_text, answer_set_table = "year", [], [], ["2012", "2018", "2019"]
-
-        """
-        answer_class, answer_set_image, answer_set_text, answer_set_table = self.fill_criterias(question, question_data,
-                                                                                                question_files,
-                                                                                                image_dir, text_dir,
-                                                                                                table_dir, modalities,
-                                                                                                starting_modality)
-        """
-
-        final_answer = self.return_final_answer(answer_class, answer_set_image, answer_set_text, answer_set_table)
+        final_answer = None
+        while final_answer is None:
+            # If answer is still None, chose another modality. For now we are choosing the second modality randomly.
+            modality = random.choice(list(modalities_to_try))
+            modalities_to_try.remove(modality)
+            # answer_class, answer_set_image, answer_set_text, answer_set_table = "year", [], [], ["2012", "2018", "2019"]
+            answer_class, answer_set_image, answer_set_text, answer_set_table = self.fill_criterias(question,
+                                                                                                    question_data,
+                                                                                                    question_files,
+                                                                                                    image_dir, text_dir,
+                                                                                                    table_dir,
+                                                                                                    modalities,
+                                                                                                    modality)
+            final_answer = self.return_final_answer(answer_class, answer_set_image, answer_set_text, answer_set_table)
 
         """
         d = {"answer": None, "entropy_level": random.random()}
