@@ -1,18 +1,19 @@
 from __future__ import annotations
-from openai import OpenAI
-from dotenv import load_dotenv
+from miscellaneous.prompt import system_prompt_criteria, user_prompt_criteria
+from miscellaneous.json_schemas import json_schema_extraction_criteria
 
 import json
 import os
 from typing import Literal, Optional, List
 from pydantic import BaseModel, Field
+import random
 
 # ---- Enums / literals ----
 
-AnswerType = Literal[
-    "year", "date", "city", "state", "country", "person", "organization",
-    "number", "percentage", "currency", "duration", "title", "other"
-]
+# AnswerType = Literal[
+#    "year", "date", "city", "state", "country", "person", "organization",
+#    "number", "percentage", "currency", "duration", "title", "other"
+# ]
 
 EntityType = Literal[
     "person", "organization", "team", "award", "league", "event", "work", "place", "other"
@@ -30,20 +31,42 @@ ConstraintKind = Literal[
     "other"
 ]
 
+ConstraintTopic = Literal[
+    "Film",
+    "Transportation",
+    "Video games",
+    "Industry",
+    "Theater",
+    "Television",
+    "Music",
+    "Geography",
+    "Literature",
+    "History",
+    "Economy",
+    "Sports",
+    "Science",
+    "Politics",
+    "Buildings",
+    "Other"
+]
+
 
 # ---- Core models ----
 
+
+class QuestionTopic(BaseModel):
+    question_topic: ConstraintTopic = Field(..., description="Topic of the question")
+
+
 class AnswerSubject(BaseModel):
-    answer_class: AnswerType = Field(
-        ...,
-        description="Minimal generic type of the expected answer."
-    )
+    expected_answer_type_specific: str = Field(..., description="Specific type of the expected answer")
+    expected_answer_type_general: str = Field(..., description="Generic type of the expected answer")
 
 
 class Target(BaseModel):
     text: str = Field(..., description="Main entity the question is about.")
     # type: #EntityType = Field(..., description="Type of the target entity.")
-    type: str = Field(default=None, description="Type fo target entity.")
+    type: str = Field(default=None, description="Type of target entity.")
 
 
 class Constraint(BaseModel):
@@ -66,7 +89,8 @@ class Alias(BaseModel):
 
 
 class DistinctionCriteria(BaseModel):
-    answer_class: AnswerSubject
+    topic: QuestionTopic
+    expected_answer_type: AnswerSubject
     expected_cardinality: Literal["single", "multiple", "unknown"] = "single"
 
     target: Target
@@ -79,108 +103,163 @@ class DistinctionCriteria(BaseModel):
     rewritten_question: str = Field(..., description="Minimal rewrite preserving meaning.")
 
 
-def save_json_file(json_object, file_name: str, question_text: str, criteria_extraction_dir, iteration):
-    os.makedirs(f"{criteria_extraction_dir}_{iteration}", exist_ok=True)
-    path = os.path.join(f"{criteria_extraction_dir}_{iteration}", file_name)
+def save_json_file(json_object, file_name, question_text, criteria_extraction_dir, model, iteration):
+    os.makedirs(f"{criteria_extraction_dir}/{model}/iteration_{iteration}", exist_ok=True)
+    path = os.path.join(f"{criteria_extraction_dir}/{model}/iteration_{iteration}", file_name)
+
+    print(path)
 
     # Ensure .json extension
     if not path.endswith(".json"):
         path += ".json"
 
-    # Pydantic model -> dict
+    # Case 1: Pydantic model -> dict
     if hasattr(json_object, "model_dump"):
-        print("uao")
         payload = json_object.model_dump()
+
+    # Case 2: String input (possibly JSON string)
+    elif isinstance(json_object, str):
+        try:
+            payload = json.loads(json_object)  # parse JSON string into dict/list
+        except json.JSONDecodeError:
+            # fallback: save as raw text inside JSON
+            payload = {"text": json_object}
+    else:
+        payload = json_object
+
+    # Add original question
+    if isinstance(payload, dict):
         payload["original_question"] = question_text
     else:
-        print("Show me")
-        payload = json_object
-        payload["original_question"] = question_text
+        payload = {"data": payload, "original_question": question_text}
 
     with open(path, "w", encoding="utf-8") as f:
+        print("Final dump")
+        print(payload)
         json.dump(payload, f, ensure_ascii=False, indent=4)
 
 
-def extract_criterias(question_text, question, criteria_extraction_dir, iteration):
-    response = client.responses.parse(
-        model="gpt-5.2",
-        input=[
-            {
-                "role": "system",
-                "content": """You extract structured query frames from natural-language questions. Return ONLY valid 
-                JSON that matches the provided schema. Do not use outside knowledge; only what is in the question."""
-            },
-            {
-                "role": "user",
-                "content": f"""
-                            Return DistinctionCriteria for the question below.
 
-                            High-level goals:
-                            - Identify the answer type (answer_class.answer_class) as the minimal generic type:
-                              Use ONE of: year, date, city, state, country, person, organization, number, percentage, currency, duration, title, other.
-                              Do NOT include named entities or extra words.
-                            
-                            - Identify the target: the main entity the question is about (usually a person, organization, award, etc).
-                            
-                            - asked_property: write a short predicate describing what is being requested about the target
-                              Examples: "year won award", "team played for", "birthplace", "population", "date founded".
-                            
-                            - constraints: extract atomic, independently-checkable conditions the correct answer must satisfy.
-                              Prefer multiple short constraints instead of one long one.
-                              Each constraint must include:
-                                - kind: one of relation, award, league, season, time, role, qualifier, domain, other
-                                - evidence: exact phrase from the question
-                                - normalized: normalized/cleaned version of that phrase
-                            
-                            - time_constraints:
-                              If any explicit season/year/date range is present, add a TimeConstraint.
-                              Normalize seasons like "2014-15 season" -> start_year=2014, end_year=2015, label="2014-15 season".
-                            
-                            - aliases:
-                              Add alternative spellings or suspected typos only if strongly implied by the question text (otherwise empty).
-                            
-                            - rewritten_question:
-                              Rewrite the question by using the extracted information. Remove fluff while keep the meaning. 
-                              
-                            Rules:
-                            - Do NOT restate the full question in constraints.
-                            - Do NOT add facts that are not explicitly in the question.
-                            - expected_cardinality: "single" if the question asks for one specific thing, else "multiple" or "unknown".
-                            
-                            Question: {question_text}
-                            """
+def extract_criterias(model, client, question_text, question, criteria_extraction_dir, iteration):
+    # Add tho the prompt the generation of a set that contains the entire information brought by the sentence.
+
+    if model == "gpt-5.2":
+        response = client.responses.parse(
+            model=model,
+            input=[
+                {
+                    "role": "system",
+                    "content": system_prompt_criteria
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt_criteria.format(question_text=question_text)
+                }
+            ],
+            text_format=DistinctionCriteria,
+        )
+
+        distinction_criterias = response.output_parsed
+        print("see: ", dir(distinction_criterias))
+        print("See: ", distinction_criterias)
+        save_json_file(distinction_criterias, question, question_text, criteria_extraction_dir, model, iteration)
+
+    elif model == "claude-sonnet-4-5":
+        print("Ci piace ancora di più")
+        response = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            system=system_prompt_criteria,
+            messages=[
+                {
+                    "role": "user",
+                    "content": user_prompt_criteria.format(question_text=question_text)
+                }
+            ],
+            output_config={
+                "format": {
+                    "type": "json_schema",
+                    "schema": json_schema_extraction_criteria
+                }
             }
-        ],
-        text_format=DistinctionCriteria,
-    )
+        )
 
-    distinction_criterias = response.output_parsed
-    print("see: ", dir(distinction_criterias))
-    print("See: ", distinction_criterias)
-    save_json_file(distinction_criterias, question, question_text, criteria_extraction_dir, iteration)
+        distinction_criterias = response.content[0].text
+        save_json_file(distinction_criterias, question, question_text, criteria_extraction_dir, model, iteration)
+
+    elif model == "deepseek-r1:8b":
+        print("Eccoci qua")
+        """
+        configs = {
+            "max_tokens": 200,
+            "temperature": 0.0,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "personal_answer",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "country": {"type": "string"},
+                            "capital": {"type": "string"}
+                        },
+                        "required": ["country", "capital"],
+                        "additionalProperties": False
+                    }
+                }
+            }
+        }
+        """
+
+        configs = {
+            "max_tokens": 1000,
+            "temperature": 0.0,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "extracted_criterias",
+                    "schema": json_schema_extraction_criteria
+                }
+            }
+        }
+
+        print("Vediamo questo bel prompt")
+        print(user_prompt_criteria.format(question_text=question_text))
+
+        prompt_parameters = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt_criteria},
+                {"role": "user", "content": user_prompt_criteria.format(question_text=question_text)}
+            ],
+        }
+
+        prompt_parameters.update(configs)
+
+        response = client.chat.completions.create(**prompt_parameters)
+        distinction_criterias = response.choices[0].message.content
+
+        print(f"Response: {type(distinction_criterias), distinction_criterias}\n\n")
+        print(f"Usage stats: {response.usage}")
+
+        save_json_file(distinction_criterias, question, question_text, criteria_extraction_dir, model, iteration)
 
 
-if __name__ == '__main__':
-    dc = DistinctionCriteria(
-        answer_class=AnswerSubject(answer_class="year"),
-        target=Target(text="Paris"),  # ← depends on your Target model
-        asked_property="capital of",
-        rewritten_question="What is the capital of France?"
-    )
+def extract_criterias_main(model, client):
 
-    load_dotenv()
-    OPENAI_KEY = os.getenv("OPENAI_KEY")
     QUESTIONS_MULTIMODALQA_TRAINING = os.getenv("QUESTIONS_MULTIMODALQA_TRAINING")
     CRITERIA_EXTRACTION_DIR = os.getenv("CRITERIA_EXTRACTION_DIR")
 
-    client = OpenAI(api_key=OPENAI_KEY)
+    selected_questions = random.sample(os.listdir(QUESTIONS_MULTIMODALQA_TRAINING), 1000)
 
     # The loop is to repeat the criteria extraction multiple times
     for iteration in range(0, 1):
-        for i, question in enumerate(sorted(os.listdir(QUESTIONS_MULTIMODALQA_TRAINING))[:10]):
+        for i, question in enumerate(sorted(os.listdir(QUESTIONS_MULTIMODALQA_TRAINING))[:1]):
             print("Question: ", i, question)
             json_question = json.load(open(os.path.join(QUESTIONS_MULTIMODALQA_TRAINING, question), "rb"))
             question_text = json_question["question"]
+            answer_text = json_question["answers"][0]["answer"]
             print("Question text: ", question_text)
+            print("Answer text: ", answer_text)
 
-            extract_criterias(question_text, question, CRITERIA_EXTRACTION_DIR, iteration)
+            extract_criterias(model, client, question_text, question, CRITERIA_EXTRACTION_DIR, iteration)

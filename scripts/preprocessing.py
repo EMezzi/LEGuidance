@@ -119,6 +119,8 @@ def unimodal_multimodal_statistics():
         ax.spines["right"].set_visible(False)
 
     plt.xticks(rotation=30, ha="right")
+
+    plt.savefig("dataset_statistics.png", dpi=300)
     plt.show()
 
 

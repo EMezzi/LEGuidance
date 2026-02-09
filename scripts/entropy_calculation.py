@@ -1,13 +1,21 @@
 import os
-import ast
 import time
 import json
 import random
 import base64
-from openai import OpenAI
-from dotenv import load_dotenv
-from pydantic import BaseModel, Field
 from typing import List
+from pydantic import BaseModel, Field
+from sentence_transformers import SentenceTransformer
+
+from miscellaneous.prompt import (
+    system_prompt_image, user_prompt_image_text_input, user_prompt_image_image_input,
+    system_prompt_text, user_prompt_text,
+    system_prompt_table, user_prompt_table,
+    system_prompt_row, user_prompt_row,
+    system_prompt_answer_set, user_prompt_answer_set
+)
+
+from miscellaneous.json_schemas import json_schema_check_criteria, json_schema_answer_set, json_schema_table_description
 
 
 class AnswerContainsCriteria(BaseModel):
@@ -39,6 +47,18 @@ def get_question_data(question_dir, question):
             "table_id": table_id}
 
 
+def detect_media_type_from_bytes(data: bytes) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8"):
+        return "image/jpeg"
+    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+        return "image/gif"
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    raise ValueError("Unknown image format (not png/jpg/gif/webp)")
+
+
 def encode_image(image_path):
     with open(image_path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
@@ -63,7 +83,7 @@ def flatten_extend(matrix):
     return flat_list
 
 
-def create_association_qa(questions_dir, image_dir, text_dir, table_dir, association_dir):
+def create_association_qa(a, questions_dir, association_dir, image_dir, text_dir, table_dir):
     for question in sorted(os.listdir(questions_dir)):
         if question not in os.listdir(association_dir):
             print("Question: ", question)
@@ -72,24 +92,25 @@ def create_association_qa(questions_dir, image_dir, text_dir, table_dir, associa
             a.create_connection(question, question_data, image_dir, text_dir, table_dir, association_dir)
 
 
-def answer_qa(questions_dir, association_dir, image_dir, text_dir, table_dir, answers_dir, modalities):
+def answer_qa(model, agent, questions_dir, association_dir, table_dir, answers_dir):
+    os.makedirs(answers_dir, exist_ok=True)
+    os.makedirs(f"../results/partitions_created/{model}/", exist_ok=True)
+
     for question in sorted(os.listdir(questions_dir))[:1]:
         print("Question: ", question)
         # if question not in os.listdir(os.path.join(answers_dir, mode)):
         question_data = get_question_data(questions_dir, question)
         question_files = get_question_files(association_dir, question)
-        a.answer_question(question, question_data, question_files, image_dir, text_dir, table_dir,
-                          answers_dir, modalities)
+        agent.answer_question(model, question, question_data, question_files, table_dir, answers_dir)
 
 
 class Agent:
-    def __init__(self, key, path_criterias, modalities):
-        self.key = key
-        self.client = OpenAI(api_key=self.key)
+    def __init__(self, client, path_criterias, modalities):
+        self.client = client
         self.path_criterias = path_criterias
         self.modalities = modalities
 
-    def create_connection(self, question, question_data, image_dir, text_dir, table_dir, association_dir):
+    def create_connection(self, question, question_data, association_dir):
         start_time = time.time()
 
         all_data_json_object = json.load(
@@ -115,7 +136,7 @@ class Agent:
     def read_criterias(self, question):
         criteria_object = json.load(open(os.path.join(self.path_criterias, question), "rb"))
 
-        criterias = [criteria_object["answer_class"]["answer_class"],
+        criterias = [criteria_object["expected_answer_type"]["expected_answer_type_specific"],
                      criteria_object["target"]["text"],
                      criteria_object["asked_property"]]
 
@@ -138,10 +159,7 @@ class Agent:
     def create_text_set(self, question_data, all_data_text):
         print("Create text set")
         texts = question_data["text_doc_ids"]
-        answer_set_text = []
-
-        for text in texts:
-            answer_set_text.append(all_data_text[text])
+        answer_set_text = [all_data_text[text] for text in texts]
 
         return answer_set_text
 
@@ -177,149 +195,273 @@ class Agent:
 
         return answer_set_tables
 
-    def analyse_image(self, criteria, metadata, image64):
+    def analyse_image(self, model, criteria, metadata, image):
         """This method checks whether an image can be separated from the others based on a specific criteria."""
 
-        response = self.client.responses.parse(
-            model="gpt-5.2",
-            input=[
-                {
-                    "role": "system",
-                    "content": """You are a visual recognition assistant. Your task is to determine whether the given image contains 
-                    a visual element, object, structure, or concept that matches the provided criteria, even if the criteria is not written as text. 
-                    Respond only with 'yes' or 'no'."""
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": f"Does the image with title '{metadata}' contain something that can be described as: '{criteria}'?"
-                        },
-                        {
-                            "type": "input_image",
-                            "image_url": f"data:image/jpeg;base64,{image64}",
-                        },
-                    ]
+        if model == "gpt-5.2":
+            image64 = encode_image(
+                os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
+                             image["path"]))
+
+            response = self.client.responses.parse(
+                model="gpt-5.2",
+                input=[
+                    {
+                        "role": "system",
+                        "content": system_prompt_image
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": user_prompt_image_text_input.format(metadata=metadata, criteria=criteria),
+                            },
+                            {
+                                "type": "input_image",
+                                "image_url": user_prompt_image_image_input.format(image64=image64),
+                            },
+                        ]
+                    }
+                ],
+                text_format=AnswerContainsCriteria,
+            )
+
+            found = response.output_parsed
+            return found.answer
+
+        elif model == "claude-sonnet-4-5":
+            print("Image is: ", image["path"])
+
+            with open(os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
+                                   image["path"]), "rb") as f:
+                image_bytes = f.read()
+
+            media_type = detect_media_type_from_bytes(image_bytes)
+
+            image64 = encode_image(
+                os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
+                             image["path"]))  # base64.standard_b64encode(image_bytes).decode("utf-8")
+
+            response = self.client.messages.create(
+                model=model,
+                system=system_prompt_image,
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": user_prompt_image_text_input.format(metadata=metadata, criteria=criteria),
+                            },
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": image64,
+                                }
+                            },
+                        ]
+                    }
+                ],
+                output_config={
+                    "format": {
+                        "type": "json_schema",
+                        "schema": json_schema_check_criteria
+                    }
                 }
-            ],
-            text_format=AnswerContainsCriteria,
-        )
+            )
 
-        found = response.output_parsed
-        return found.answer
+            found = json.loads(response.content[0].text)
+            return found["answer"]
 
-    def analyse_text(self, criteria, paragraph, metadata):
+    def analyse_text(self, model, criteria, paragraph, metadata):
         """This method checks whether a text can be separated from the others based on a specific criteria."""
 
-        response = self.client.responses.parse(
-            model="gpt-5.2",
-            input=[
-                {
-                    "role": "system",
-                    "content": """You are a text analysis assistant. Your task is to determine whether the given text 
-                    contains a concept, statement, fact, or idea that matches the provided criteria, even if the wording differs
-                    or the criteria is only implied. Respond only with 'yes' or 'no'.
-                    """
-                },
-                {
-                    "role": "user",
-                    "content": f"""Does the following text with title {metadata} contain something that can be described as: '{criteria}'?
-                    Text: '''{paragraph}'''
-                    """
+        if model == "gpt-5.2":
+            response = self.client.responses.parse(
+                model="gpt-5.2",
+                input=[
+                    {
+                        "role": "system",
+                        "content": system_prompt_text
+                    },
+                    {
+                        "role": "user",
+                        "content": user_prompt_text.format(metadata=metadata, criteria=criteria, paragraph=paragraph)
+                    }
+                ],
+                text_format=AnswerContainsCriteria,
+            )
+
+            found = response.output_parsed
+            return found.answer
+
+        elif model == "claude-sonnet-4-5":
+            response = self.client.messages.create(
+                model=model,
+                system=system_prompt_text,
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": user_prompt_text.format(metadata=metadata, criteria=criteria, paragraph=paragraph)
+                    }
+                ],
+                output_config={
+                    "format": {
+                        "type": "json_schema",
+                        "schema": json_schema_check_criteria
+                    }
                 }
-            ],
-            text_format=AnswerContainsCriteria,
-        )
+            )
+            print(response.content[0].text)
+            found = json.loads(response.content[0].text)
+            return found["answer"]
 
-        found = response.output_parsed
-        return found.answer
+    def table_general_understanding(self, model, metadata, columns):
 
-    def table_general_understanding(self, metadata, columns):
+        if model == "gpt-5.2":
+            response = self.client.responses.parse(
+                model=model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": system_prompt_table
+                    },
+                    {
+                        "role": "user",
+                        "content": user_prompt_table.format(metadata=metadata, columns=columns)
+                    }
+                ],
+                text_format=TableDescription,
+            )
 
-        response = self.client.responses.parse(
-            model="gpt-5.2",
-            input=[
-                {
-                    "role": "system",
-                    "content": """You are a data understanding assistant. Your task is to infer the general topic and 
-                    purpose of a table based only on its metadata and column names. Do NOT invent specific data values or row-level details.
-                    Produce a concise, high-level description that applies to all rows.
-                    """
-                },
-                {
-                    "role": "user",
-                    "content": f"""Table title / metadata: '''{metadata}'''
-                    
-                    Column names: '''{columns}'''
-                    
-                    Generate a short description of what this table is about.
-                    """
+            found = response.output_parsed
+            return found.description
+
+        elif model == "claude-sonnet-4-5":
+            response = self.client.messages.create(
+                model=model,
+                system=system_prompt_table,
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": user_prompt_table.format(metadata=metadata, columns=columns)
+                    }
+                ],
+                output_config={
+                    "format": {
+                        "type": "json_schema",
+                        "schema": json_schema_table_description
+                    }
                 }
-            ],
-            text_format=TableDescription,
-        )
+            )
 
-        found = response.output_parsed
-        return found.description
+            found = json.loads(response.content[0].text)
+            return found["description"]
 
-    def analyse_table_row(self, criteria, row, metadata, description):
+    def analyse_table_row(self, model, criteria, row, metadata, description):
         """This method checks whether a table row can be separated from the others based on a specific criteria."""
 
-        response = self.client.responses.parse(
-            model="gpt-5.2",
-            input=[
-                {
-                    "role": "system",
-                    "content": """You are a table analysis assistant. 
-                    Your task is to determine whether a single table row contains data that matches the provided 
-                    criteria, either explicitly or implicitly.
-                    Consider the meaning of the entire row, not just exact wording.
-                    Respond only with 'yes' or 'no'.
-                    """
-                },
-                {
-                    "role": "user",
-                    "content": f"""Does the following row of the table with title {metadata} and description {description}
-                    contain something that can be described as: '{criteria}'?
-                    Table row: '''{row}'''
-                    """
+        # Split the search in the table in two phases. First you only do the splitting with the metadata, and then
+        # you try to do the partitioning with the rows
+
+        print("Metadata table: ", metadata)
+        print("Description table: ", description)
+        print("Row: ", row)
+
+        if model == "gpt-5.2":
+            response = self.client.responses.parse(
+                model="gpt-5.2",
+                input=[
+                    {
+                        "role": "system",
+                        "content": system_prompt_row
+                    },
+                    {
+                        "role": "user",
+                        "content": user_prompt_row.format(metadata=metadata, description=description, criteria=criteria,
+                                                          row=row)
+                    }
+                ],
+                text_format=AnswerContainsCriteria,
+            )
+
+            found = response.output_parsed
+            return found.answer
+
+        elif model == "claude-sonnet-4-5":
+            response = self.client.messages.create(
+                model=model,
+                system=system_prompt_row,
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": user_prompt_row.format(metadata=metadata, description=description, criteria=criteria,
+                                                          row=row)
+                    }
+                ],
+                output_config={
+                    "format": {
+                        "type": "json_schema",
+                        "schema": json_schema_check_criteria
+                    }
                 }
-            ],
-            text_format=AnswerContainsCriteria,
-        )
+            )
 
-        found = response.output_parsed
-        return found.answer
+            found = json.loads(response.content[0].text)
+            return found["answer"]
 
-    def create_answer_set(self, target_answer, elements_type, elements):
-        response = self.client.responses.parse(
-            model="gpt-5.2",
-            input=[
-                {
-                    "role": "system",
-                    "content": """You are an answer set extraction assistant.
-                    Your task is to extract all values belonging to a specified answer category from a collection of elements.
-                    
-                    Only extract values that are explicitly present or can be unambiguously inferred from the provided data.
-                    Do NOT invent values or use general world knowledge.
-                    Return a deduplicated list.
-                    """
-                },
-                {
-                    "role": "user",
-                    "content": f"""Target answer category: '''{target_answer}'''
-                    Elements from which to extract the answer set ({elements_type}): '''{elements}'''
-                    
-                    Extract all values that belong to the target answer category.
-                    """
+    def create_answer_set(self, model, target_answer, elements_type, elements):
+
+        if model == "gpt-5.2":
+            response = self.client.responses.parse(
+                model=model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": system_prompt_answer_set
+                    },
+                    {
+                        "role": "user",
+                        "content": user_prompt_answer_set.format(target_answer=target_answer,
+                                                                 elements_type=elements_type, elements=elements)
+                    }
+                ],
+                text_format=AnswerSetResponse,
+            )
+
+            found = response.output_parsed
+            return found.answer_set
+
+        elif model == "claude-sonnet-4-5":
+            response = self.client.messages.create(
+                model=model,
+                system=system_prompt_answer_set,
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": user_prompt_answer_set.format(target_answer=target_answer,
+                                                                 elements_type=elements_type, elements=elements)
+                    }
+                ],
+                output_config={
+                    "format": {
+                        "type": "json_schema",
+                        "schema": json_schema_answer_set
+                    }
                 }
-            ],
-            text_format=AnswerSetResponse,
-        )
+            )
 
-        found = response.output_parsed
-        return found.answer_set
+            found = json.loads(response.content[0].text)
+            print(found, type(found))
+            return found["answer_set"]
 
     def decide_modality(self, question):
         """This method decides the modality from which to start."""
@@ -328,12 +470,9 @@ class Agent:
             open("/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/extracted_rules/initialization_rules.json",
                  "rb"))
 
-        print(rules_json.keys())
-
         rules = [{f"R{i}": {"condition": rule["condition"], "predicted_modalities": rule["predicted_modalities"]}} for
                  i, rule in enumerate(rules_json["rules"])]
 
-        print(rules)
         rules.append({
             f"R{len(rules_json['rules'])}": {
                 "condition": rules_json["fallback_rule"]["condition"],
@@ -341,14 +480,10 @@ class Agent:
             }
         })
 
-        print(rules)
-
         rule_conditions_string = ""
 
         for i, rule in enumerate(rules):
             rule_conditions_string += f"\t{i}. R{i}: {rule[f'R{i}']['condition']}\n"
-
-        print(rule_conditions_string)
 
         response = self.client.responses.parse(
             model="gpt-5.2",
@@ -399,28 +534,34 @@ class Agent:
 
         for rule in rules:
             if rule_id in rule:
-                return rule[rule_id]["predicted_modalities"]
+                return rule[rule_id]["predicted_modalities"][0]
 
-    def fill_criteria_images(self, criterias, question_files, partitions):
+    def fill_criteria_images(self, model, criterias, question_files, partitions):
         """This method checks whether the splitting is possible for each criteria for images."""
 
         for criteria in criterias:
             print("Current criteria is: ", criteria)
             correct_elements = []
             image_set = question_files['image_set']
+            print("The image set is: ", image_set)
             for image in image_set:
+                print("The image is: ", image)
                 metadata = image["title"]
-                image_base64 = encode_image(
-                    os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                                 image["path"]))
-                answer = self.analyse_image(criteria, metadata, image_base64)
+                answer = self.analyse_image(model, criteria, metadata, image)
+
                 if answer.lower() == "yes":
                     correct_elements.append(image)
 
             partition = self.create_partition(image_set, correct_elements, criteria)
             partitions["image"].append(partition)
 
-    def fill_criteria_text(self, criterias, question_files, partitions):
+            filling = partition['splitting']['filling']
+            not_filling = partition['splitting']['not_filling']
+
+            print(partition['splitting']['filling'], len(filling))
+            print(partition['splitting']['not_filling'], len(not_filling))
+
+    def fill_criteria_text(self, model, criterias, question_files, partitions):
         """This method checks whether the splitting is possible for each criteria for texts."""
 
         for criteria in criterias:
@@ -431,7 +572,7 @@ class Agent:
             for text in text_set:
                 print("The text is: ", text)
                 metadata = text["title"]
-                answer = self.analyse_text(criteria, text["text"], metadata)
+                answer = self.analyse_text(model, criteria, text["text"], metadata)
 
                 if answer.lower() == "yes":
                     correct_elements.append(text)
@@ -439,27 +580,31 @@ class Agent:
             partition = self.create_partition(text_set, correct_elements, criteria)
             partitions["text"].append(partition)
 
-    def fill_criteria_table(self, criterias, question_files, table_dir, answer_class, partitions):
+            filling = partition['splitting']['filling']
+            not_filling = partition['splitting']['not_filling']
+
+            print(partition['splitting']['filling'], len(filling))
+            print(partition['splitting']['not_filling'], len(not_filling))
+
+    def fill_criteria_table(self, model, criterias, question_files, table_dir, partitions):
         """This method checks whether the splitting is possible for each criteria for table rows."""
         table_set = question_files["table_set"]
         table = table_set[0].copy()
 
         entire_table = json.load(open(os.path.join(table_dir, table['json']), 'rb'))
         title = entire_table['title']
+        print("URL table: ", entire_table['url'])
         table_columns = [element["column_name"] for element in entire_table["table"]["header"]]
         rows = table[list(table.keys())[0]]
 
-        table_description = self.table_general_understanding(title, table_columns)
-
-        answer_set_table = self.create_answer_set(answer_class, "table_rows", rows)
-        print("The answer set is: ", answer_set_table)
+        table_description = self.table_general_understanding(model, title, table_columns)
 
         for criteria in criterias:
             print("Current criteria is: ", criteria)
             correct_elements = []
 
             for row in rows:
-                answer = self.analyse_table_row(criteria, row, title, table_description)
+                answer = self.analyse_table_row(model, criteria, row, title, table_description)
                 if answer.lower() == "yes":
                     correct_elements.append(row)
 
@@ -473,37 +618,30 @@ class Agent:
             print(partition['splitting']['filling'], len(filling))
             print(partition['splitting']['not_filling'], len(not_filling))
 
-    def fill_criterias(self, question: str, question_data: dict, question_files: dict,
-                       image_dir: str, text_dir: str, table_dir: str, modalities: list, starting_modality: str):
+    def fill_criterias(self, model, question: str, question_files: dict, table_dir: str, starting_modality: str,
+                       criterias, partitions):
         """This method checks whether images, text, and table rows, can be split based on the distinction criterias."""
 
-        answer_set_image, answer_set_text, answer_set_table = [], [], []
-
         # Here we extract the criterias to search for in the modalities
-        answer_class, *criterias = self.read_criterias(question)
-        n_criterias = len(criterias)
-
-        partitions = {"image": [], "text": [], "table": []}
+        # answer_class, *criterias = self.read_criterias(question)
+        # n_criterias = len(criterias)
 
         # Lower bound: only one modality, and upper bound by selecting one modality only
         # Upper bound: brute force And with this process we show the association between the question and the type of
         # modality to answer it (single one of fusion)
         # Check weather the additional modality is noise
         if starting_modality == "image":
-            self.fill_criteria_images(criterias, question_files, partitions)
+            self.fill_criteria_images(model, criterias, question_files, partitions)
 
         elif starting_modality == "text":
-            self.fill_criteria_text(criterias, question_files, partitions)
+            self.fill_criteria_text(model, criterias, question_files, partitions)
 
         elif starting_modality == "table":
-            self.fill_criteria_table(criterias, question_files, table_dir, answer_class, partitions)
+            self.fill_criteria_table(model, criterias, question_files, table_dir, partitions)
 
         # Check the partition with the lowest logical entropy (le > 0 and le < 1)
-        with open("/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/partitions_created/partitions.json",
-                  "w") as json_file:
+        with open(f"../results/partitions_created/{model}/partitions_{question}", "w") as json_file:
             json.dump(partitions, json_file, indent=4)
-
-        return answer_class, answer_set_image, answer_set_text, answer_set_table
 
     def create_partition(self, all_data, selected_data, criteria):
         """This method creates the partition."""
@@ -523,26 +661,27 @@ class Agent:
         else:
             n_elements = sum([len(partition[key]) for key in partition])
             p = 1 / n_elements
-
             cumulative_prob = sum([pow(p * len(partition[key]), 2) for key in partition])
-
             le = 1 - cumulative_prob
 
         return le if le > 0 or le < 1 else 1
 
-    def return_final_answer(self, answer_class, answer_set_image, answer_set_text, answer_set_table):
+    def return_final_answer(self, model, question, answer_class, answers_dir):
         """This method allows to retrieve the final answer. It receives in input the answer_class,
         and the answer_sets."""
-        answer_sets = {"image": answer_set_image, "text": answer_set_text, "table": answer_set_table}
+        # answer_sets = {"image": answer_set_image, "text": answer_set_text, "table": answer_set_table}
 
-        partitions = json.load(open(
-            os.path.join("/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/partitions_created",
-                         "partitions.json"), "rb"))
+        partitions = json.load(
+            open(os.path.join(f"../results/partitions_created/{model}", f"partitions_{question}"), "rb"))
+
+        print("Partitions are: ", partitions)
 
         # The partition must bring the modality from which they were created. This way is it possible to
         fillings = [{"modality": modality, "i": i, "filling": partition["splitting"]["filling"], "le": partition["le"],
                      "criteria": partition["criteria"]} for modality in partitions.keys() for i, partition in
-                    enumerate(partitions[modality])]
+                    enumerate(partitions[modality]) if partition["le"] > 0]
+
+        print("The fillings are: ", fillings)
 
         # Minimum logical entropy among those
         min_le = min(x["le"] for x in fillings)
@@ -573,77 +712,97 @@ class Agent:
 
         print("The modality of election is: ", modality)
 
-        answer_set = answer_sets[modality]
+        # answer_set = answer_sets[modality]
+        # print("The answer set is: ", answer_set)
 
-        print("The answer set is: ", answer_set)
+        embeddings_model = SentenceTransformer("all-MiniLM-L6-v2")
+        answer_class_embedding = embeddings_model.encode(answer_class.lower())
 
         final_answer = None
-        for filling in min_le_filling:
-            for row in filling['filling']:
-                for cell in row:
-                    if answer_class == cell["header"].lower() and cell["text"] in answer_set:
-                        final_answer = cell["text"]
+        if modality == "table":
+            for filling in min_le_filling:
+                for row in filling['filling']:
+                    for cell in row:
+                        cell_header_embedding = embeddings_model.encode(cell["header"].lower())
+                        # if answer_class == cell["header"].lower():
+                        if embeddings_model.similarity(answer_class_embedding, cell_header_embedding) > 0.90:
+                            final_answer = cell["text"]
+
+                        # if answer_class == cell["header"].lower() and cell["text"] in answer_set:
+                        #    final_answer = cell["text"]
+
+        answer_dict = {"final_answer": final_answer}
+        json.dump(answer_dict, open(os.path.join(answers_dir, question), "w"), indent=4)
 
         return final_answer
 
-    def answer_question(self, question, question_data, question_files, image_dir, text_dir, table_dir, answer_dir,
-                        modalities):
+    def answer_question(self, model, question, question_data, question_files, table_dir, answers_dir):
         """Method which calls the other methods to calculate the final answer."""
 
-        print("Let's answer the question")
-        print(question_data)
+        print(f"Let's answer the question {question}")
+        print(f"This is the question data: {question_data}")
 
-        # Starting modality: here we select the modality with which to start. The starting modality can also be the
-        # finishing modality.
-        modalities_to_try = ["image", "text", "table"]
-        modality = self.decide_modality(question)
-        print(modality)
-        modalities_to_try.remove(modality)
+        answer_class, *criterias = self.read_criterias(question)
 
-        final_answer = None
-        while final_answer is None:
-            # If answer is still None, chose another modality. For now we are choosing the second modality randomly.
-            modality = random.choice(list(modalities_to_try))
+        print(f"This is the type of answer we want: {answer_class}")
+
+        # START CREATE ANSWER SETS
+
+        """
+        # Answer set images
+        image_set = question_files["image_set"]
+        print("Image set: ", image_set)
+        answer_set_image = self.create_answer_set(model, answer_class, "images", image_set)
+        print("The image answer set is: ", answer_set_image)
+
+        # Answer set text
+        text_set = question_files["text_set"]
+        answer_set_text = self.create_answer_set(model, answer_class, "paragraphs", text_set)
+        print("The text answer set is: ", answer_set_text)
+
+        # Answer set table
+        table_set = question_files["table_set"]
+        table = table_set[0].copy()
+        rows = table[list(table.keys())[0]]
+
+        answer_set_table = self.create_answer_set(model, answer_class, "table_rows", rows)
+        print("The table answer set is: ", answer_set_table)
+        # END ANSWER SET GENERATION
+        """
+
+        """
+        # START MODALITY SELECTION
+        modalities_to_try = ["image", "table", "text"]
+        modality = "image"  # self.decide_modality(question)
+        # END MODALITY SELECTION
+
+        # START OF THE PARTITIONING HERE: CHOSE ANOTHER MODALITY UNTIL EACH ONE OF THEM HAS BEEN CHOSEN
+        partitions = {"image": [], "text": [], "table": []}
+        while modalities_to_try:
+            print(f"The current modality is {modality.upper()}")
+            self.fill_criterias(model, question, question_files, table_dir, modality, criterias, partitions)
+
             modalities_to_try.remove(modality)
-            # answer_class, answer_set_image, answer_set_text, answer_set_table = "year", [], [], ["2012", "2018", "2019"]
-            answer_class, answer_set_image, answer_set_text, answer_set_table = self.fill_criterias(question,
-                                                                                                    question_data,
-                                                                                                    question_files,
-                                                                                                    image_dir, text_dir,
-                                                                                                    table_dir,
-                                                                                                    modalities,
-                                                                                                    modality)
-            final_answer = self.return_final_answer(answer_class, answer_set_image, answer_set_text, answer_set_table)
-
-        """
-        d = {"answer": None, "entropy_level": random.random()}
-        with open(os.path.join(answer_dir, question), "w") as json_file:
-            json.dump(d, json_file, indent=4)
+            if modalities_to_try:
+                modality = random.choice(list(modalities_to_try))
         """
 
+        print("Ciao")
+        # END OF THE PARTITIONING HERE
 
-if __name__ == '__main__':
-    load_dotenv()
+        # final_answer = self.return_final_answer(model, question, answer_class, answer_set_image, answer_set_text,
+        #                                       answer_set_table, answers_dir)
 
-    OPENAI_KEY = os.getenv("OPENAI_KEY")
+        final_answer = self.return_final_answer(model, question, answer_class, answers_dir)
 
-    MODALITIES = ast.literal_eval(os.getenv("MODALITIES", "[]"))
+        print("The final answer is: ", final_answer)
 
-    QUESTIONS_MULTIMODALQA_TRAINING = os.getenv("QUESTIONS_MULTIMODALQA_TRAINING")
-    IMAGE_DIR = os.getenv("IMAGE_DIR")
-    TEXT_DIR = os.getenv("TEXT_DIR")
-    TABLE_DIR = os.getenv("TABLE_DIR")
 
-    ASSOCIATION_DIR = os.getenv("ASSOCIATION_DIR")
-    CRITERIA_EXTRACTION_DIR = os.getenv("CRITERIA_EXTRACTION_DIR")
-    ANSWERS_DIR_TRAINING = os.getenv("ANSWERS_DIR_TRAINING")
+def entropy_calculation_main(model, agent, modalities, questions_dir, association_dir, image_dir, text_dir, table_dir,
+                             answers_dir):
+    # create_association_qa(agent, questions_dir, association_dir, image_dir, text_dir, table_dir)
 
-    a = Agent(OPENAI_KEY, os.path.join(CRITERIA_EXTRACTION_DIR, "iteration_0"), MODALITIES)
-
-    # create_association_qa(QUESTIONS_MULTIMODALQA_TRAINING, IMAGE_DIR, TEXT_DIR, TABLE_DIR, ASSOCIATION_DIR)
-
-    answer_qa(QUESTIONS_MULTIMODALQA_TRAINING, ASSOCIATION_DIR, IMAGE_DIR, TEXT_DIR, TABLE_DIR,
-              ANSWERS_DIR_TRAINING, MODALITIES)
+    answer_qa(model, agent, questions_dir, association_dir, table_dir, answers_dir)
 
     """
     log_e = a.logical_entropy({'filling': {'A', 'B', 'C'}, 'not_filling': {'D', 'E', 'F'}})
