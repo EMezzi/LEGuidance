@@ -87,7 +87,9 @@ Produce a concise, high-level description that applies to all rows.
 """
 
 user_prompt_table = """
-Table title / metadata: '''{metadata}'''
+Table title: '''{table_title}'''
+
+Table name: '''{table_name}'''
 
 Column names: '''{columns}'''
 
@@ -95,14 +97,34 @@ Generate a short description of what this table is about.
 """
 
 # Prompts for Text
-system_prompt_text = """You are a text analysis assistant. 
-Your task is to determine whether the given text contains a concept, statement, fact, or idea that matches the provided criteria, even if the wording differs or the criteria is only implied. 
+system_prompt_text = """You are a semantic verification assistant.
+
+Your task is to determine whether the given text explicitly or implicitly expresses
+an entity, fact, statement, or idea that satisfies the provided criteria.
+
+This is NOT keyword matching.
+You must evaluate semantic meaning.
+
+Guidelines:
+- The text must contain a specific instance that fulfills the criteria.
+- Paraphrases and implicit expressions are allowed.
+- General discussion of the topic without a concrete instance does NOT qualify.
+- If the connection is weak, indirect, or speculative, respond 'no'.
+- Prefer precision over recall.
+
 Respond only with 'yes' or 'no'.
 """
 
-user_prompt_text = """Does the following text with title {metadata} contain something that can be described as: '{criteria}'?
+user_prompt_text = """
+Title: {metadata}
 
-Text: {paragraph}
+Question or Expected Concept:
+"{criteria}"
+
+Text:
+{paragraph}
+
+Does the text include a specific entity, fact, or statement that corresponds the expected concept above?
 """
 
 # ANSWER SET
