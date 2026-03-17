@@ -45,8 +45,9 @@ if __name__ == "__main__":
     load_dotenv()
 
     random.seed(42)
+    iteration = "iteration_0"
 
-    models = []#"gpt-5.2"]
+    models = ["gpt-5.2"]
 
     MODALITIES = ast.literal_eval(os.getenv("MODALITIES", "[]"))
 
@@ -63,15 +64,15 @@ if __name__ == "__main__":
     dataset = pk.load(open("./modality_selection/tree_dataset.pkl", "rb"))
 
     questions_dataset = dataset_build(dataset)
+    print(questions_dataset)
     questions_list = questions_dataset.to_dict(orient="records")
+    print(questions_list)
 
-    questions_list = [q["index"] for q in questions_list[:100]]
+    questions_list = [question for question in questions_list if question["index"] in ['question_13095.json',
+                                                                                       'question_1269.json']]
 
-    diff = set(questions_list).difference(
-        set(os.listdir("/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/modalities_predicted/gpt-5.2")))
-
-    print(diff)
-    print(len(diff))
+    print(questions_list)
+    print(len(questions_list))
 
     for model in models:
         if model == "gpt-5.2":
@@ -82,10 +83,9 @@ if __name__ == "__main__":
             # extract_criterias_main(model, client)
             agent = Agent(client, os.path.join(os.path.join(CRITERIA_EXTRACTION_DIR, model), "iteration_0"), MODALITIES)
             entropy_calculation_main(model, agent,
-                                     questions_list[:100],
-                                     QUESTIONS_MULTIMODALQA_TRAINING, ASSOCIATION_DIR,
-                                     IMAGE_DIR, TEXT_DIR, TABLE_DIR, FINAL_DATASET_IMAGES,
-                                     os.path.join(ANSWERS_DIR_TRAINING, model))
+                                     questions_list,
+                                     QUESTIONS_MULTIMODALQA_TRAINING, ASSOCIATION_DIR, TABLE_DIR, FINAL_DATASET_IMAGES,
+                                     os.path.join(f"{ANSWERS_DIR_TRAINING}/iteration_1", model))
 
         elif model == "claude-sonnet-4-5":
             print("Vai con anthropic che ci piace")
