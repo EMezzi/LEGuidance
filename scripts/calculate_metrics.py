@@ -11,6 +11,7 @@ iteration = "iteration_1"
 
 
 def plot_results(responses, iteration):
+    print(responses)
     modalities = list(responses.keys())
     accuracy = [
         round(responses[m]['correct'] / (responses[m]['correct'] + responses[m]['incorrect']) * 100, 2)

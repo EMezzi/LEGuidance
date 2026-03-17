@@ -329,6 +329,59 @@ Answer "yes" if at least one fact is present, otherwise answer "no".
             found = response.output_parsed
             return found.answer
 
+    def analyse_text_bridge_element(self, model, question_text, title, criteria, text):
+        print("variables")
+        print(question_text)
+        print(criteria)
+        print(text)
+
+        if model == "gpt-5.2":
+            response = self.client.responses.parse(
+                model="gpt-5.2",
+                input=[
+                    {
+                        "role": "system",
+                        "content": f"""You are a reasoning assistant.
+
+You are given: 
+- A QUESTION
+- Two paragraphs: PARAGRAPH 1 AND PARAGRAPH 2
+
+Your task is to determine whether any entity, concept, or fact mentioned in PARAGRAPH 1 is also present in PARAGRAPH 2.
+
+Rules:
+1) Use only the text provided.
+2) Do NOT require full fact matching.
+3) If any shared entity, name, or concept (e.g., "Manchester United") appears in both paragraphs, respond "yes".
+
+Respond ONLY with "yes" or "no"."""
+                    },
+                    {
+                        "role": "user",
+                        "content": f"""QUESTION:
+                        {question_text}
+                        
+TITLE PARAGRAPH 1: 
+{title}
+
+PARAGRAPH 1: 
+{criteria}
+
+PARAGRAPH 2:
+{text}
+
+Task:
+Determine whether any entity, concept, or fact mentioned in PARAGRAPH 1 is also present in PARAGRAPH 2..
+
+Answer "yes" or "no"."""
+                    }
+                ],
+                text_format=AnswerContainsCriteria,
+            )
+
+            found = response.output_parsed
+            return found.answer
+
     def analyse_text_restricting_criteria(self, model, criteria, metadata, text):
         if model == "gpt-5.2":
             response = self.client.responses.parse(
@@ -338,10 +391,10 @@ Answer "yes" if at least one fact is present, otherwise answer "no".
                         "role": "system",
                         "content": f"""You are a reasoning assistant.
 
-Your task it to determine whether any of the concepts contained in CRITERIA also contained in PARAGRAPH or its METADATA/TITLE.
+Your task is to determine whether any of the concepts contained in  are also contained in PARAGRAPH or its METADATA/TITLE.
 
 Rules:
-1) Use only information explicitly stated in the PARAGRAPH and its METADATA/TITLE.
+1) Use only information explicitly stated in CRITERIA, the PARAGRAPH and its TITLE.
 2) Do NOT use external knowledge, assumptions, or inference beyond what is written.
 4) If at least one fact is explicitly supported by the PARAGRAPH, or METADATA/TITLE, respond "yes".
 
@@ -479,6 +532,88 @@ Provide the relevant information according to the instructions.
             return bridge_element.extracted_information
 
     def extract_restricting_criteria_image(self, model, question_text, image_title, image_path, characteristics):
+        print(image_title)
+        print(image_path)
+        print(characteristics)
+
+        image64 = encode_image(
+            os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
+                         image_path))
+
+        if model == "gpt-5.2":
+            response = self.client.responses.parse(
+                model="gpt-5.2",
+                input=[
+                    {
+                        "role": "system",
+                        "content": """You are a reasoning module for a multimodal question answering system.
+
+        Your task is to identify implicit intermediate information required to answer a question and determine whether the provided image contains that information.
+        A question may require an entity or value that is not explicitly stated but must be inferred from external evidence. This missing element is called an implicit bridge element.
+
+        You are given:
+        - The QUESTION
+        - The IMAGE TITLE
+        - The CHARACTERISTICS previously checked that distinguish this IMAGE from the others
+        - The IMAGE
+
+        Step 1 — Question analysis
+        Determine whether answering the question requires identifying an intermediate element not explicitly given.
+
+        If such an element exists, extract:
+
+        Target_type:
+        The semantic category of the missing element. Do NOT output a specific instance.
+
+        Condition:
+        The property or constraint the missing element must satisfy according to the question.
+
+        Step 2 — Evidence inspection
+        You will receive a candidate image or image description.
+        Determine whether it contains information that satisfies the condition considering also the CHARACTERISTICS that helped distinguishing the IMAGE from the others in the previous steps.
+
+        Step 3 — Evidence extraction
+        If the image contains the required information, extract the entity/value and a minimal description of the supporting visual evidence.
+
+        Guidelines:
+        - Only extract information explicitly present in the image or description.
+        - Do not infer unsupported facts.
+        - Be concise and precise.
+                                """
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": f"""
+                                        QUESTION:
+        {question_text}
+
+        IMAGE TITLE:
+        {image_title}
+
+        CHARACTERISTICS: 
+        {characteristics}
+
+        Provide the relevant information according to the instructions.
+        """,
+                            },
+                            {
+                                "type": "input_image",
+                                "image_url": f"""data:image/jpeg;base64,{image64}""",
+                            },
+                        ]
+                    }
+                ],
+                text_format=BridgeElement,
+            )
+
+            bridge_element = response.output_parsed
+            print(bridge_element)
+            return bridge_element.extracted_information
+
+    def extract_restricting_criteria_image_(self, model, question_text, image_title, image_path, characteristics):
 
         print(image_title)
         print(image_path)
@@ -563,6 +698,65 @@ Provide the relevant information according to the instructions.
 
     def extract_restricting_criteria_table_row(self, model, question_text, document_title, table_name,
                                                table_description, table_row, characteristics):
+        if model == "gpt-5.2":
+            response = self.client.responses.parse(
+                model="gpt-5.2",
+                input=[
+                    {
+                        "role": "system",
+                        "content": f"""You are a reasoning module for a multimodal question answering system.
+                        
+                Your task is to extract relevant information from this TABLE_ROW in relation to the QUESTION received. 
+                
+                You are given: 
+                - The QUESTION
+                - The DOCUMENT TITLE of the document containing the table
+                - The TABLE NAME
+                - The TABLE description
+                - The TABLE ROW (with all cell values)
+                    
+                Step 1 - Question analysis: 
+                - Given the QUESTION, the TABLE NAME, the TABLE DESCRIPTION, and the TABLE ROW check if the information in the TABLE ROW is related to the QUESTION
+                
+                Step 2 - Evidence extraction: 
+                - If the TABLE ROW contains information related to the QUESTION, create a short textual description of the TABLE ROW taking into account the QUESTION. The description must be minimal and contain the entity/value that connects the TABLE_ROW to the QUESTION
+
+        Guidelines:
+        - In the description only include information explicitly present in the table row.
+        - Do not infer unsupported facts.
+        - Be concise and precise.
+                """
+                    },
+                    {
+                        "role": "user",
+                        "content": f"""QUESTION:
+        {question_text}
+
+        DOCUMENT TITLE:
+        {document_title}
+
+        TABLE NAME:
+        {table_name}
+
+        TABLE DESCRIPTION: 
+        {table_description}
+
+        TABLE ROW: 
+        {table_row}
+
+        Provide the relevant information according to the instructions.
+        """
+                    },
+                ],
+                text_format=TableRowExtraction,
+            )
+
+            bridge_element = response.output_parsed
+            print(bridge_element)
+            return bridge_element.evidence
+
+    def extract_restricting_criteria_table_row_(self, model, question_text, document_title, table_name,
+                                                table_description, table_row, characteristics):
         if model == "gpt-5.2":
             response = self.client.responses.parse(
                 model="gpt-5.2",
@@ -1203,7 +1397,7 @@ IMPORTANT:
                 found = response.output_parsed
                 return found.contains, found.entity, found.confidence
 
-    def check_answer_in_paragraph(self, model, answer_class, question_text, paragraph_text):
+    def check_answer_in_paragraph(self, model, answer_class, question_text, paragraph_text, contextual_information):
 
         if model == "gpt-5.2":
             response = self.client.responses.parse(
@@ -1212,18 +1406,23 @@ IMPORTANT:
                     {
                         "role": "system",
                         "content": """You are a semantic evidence verifier for a multimodal question answering system.
+                        
+        You are given:
+        - A QUESTION 
+        - A PARAGRAPH
+        - An EXPECTED ANSWER TYPE
+        - CONTEXTUAL INFORMATION
 
-        Your task is to determine whether a PARAGRAPH contains an entity that matches the EXPECTED ANSWER TYPE required by a QUESTION.
+        Your task is to determine whether a PARAGRAPH contains an entity that completely or partially matches the EXPECTED ANSWER TYPE required by a QUESTION.
 
-        This is NOT keyword matching.
-        You must perform semantic reasoning.
-
-        Guidelines:
-        - Consider synonyms, paraphrases, and implicit mentions.
-        - The paragraph does not need to explicitly repeat the expected answer type.
-        - Only return TRUE if the paragraph contains a specific entity that could directly answer the question.
-        - If the paragraph only provides related context but no actual answer entity, return FALSE.
-        - If uncertain, return FALSE.
+        Rules:
+        1. This is NOT keyword matching. You must perform semantic reasoning.
+        2. Consider synonyms, paraphrases, and implicit mentions.
+        3. You may use the CONTEXTUAL INFORMATION to resolve references in the QUESTION.
+        4. Only return TRUE if the PARAGRAPH contains a specific entity that could fully or partially answer the question. 
+           Partial answers are acceptable if they are relevant.
+        5. If the paragraph only provides related context but no actual answer entity, return FALSE.
+        6. If uncertain, return FALSE.
 
         Extraction rules:
         - If contains = TRUE, extract the exact text span from the paragraph.
@@ -1232,7 +1431,7 @@ IMPORTANT:
         - Copy the entity exactly as written.
         - If contains = FALSE, entity must be "NONE".
 
-        Base your decision strictly on the provided text.
+        Base your decision strictly on the provided text and contextual information.
         """
                     },
                     {
@@ -1245,6 +1444,9 @@ IMPORTANT:
 
         PARAGRAPH:
         {paragraph_text}
+        
+        CONTEXTUAL INFORMATION:
+        {contextual_information}
         """
                     }
                 ],
@@ -1547,7 +1749,7 @@ Return only one between the {tied_modalities}.
             found = response.output_parsed
             return found.modalities
 
-    def extract_partitions(self, model, question, question_text, partitions_path):
+    def extract_partitions(self, model, question, mod_chosen, question_text, partitions_path):
         """In this question we check whether it is possible to return an answer with only one modality"""
         # We state that if the predicted modality was one and if there is a partition with minimum logical entropy
         # then we can try to verify whether we can give an answer
@@ -1556,48 +1758,86 @@ Return only one between the {tied_modalities}.
             open(os.path.join(f"../results/partitions/{partitions_path}/{iteration}/{model}", f"partitions_{question}"),
                  "rb"))
 
-        average_le = average_modality_le(partitions)
-        filtered = {k: v for k, v in average_le.items() if v is not None}
-        max_value = max(filtered.values())
-        max_modalities = [k for k, v in filtered.items() if v == max_value]
+        if mod_chosen:
+            print("We are in mod chosen case")
+            fillings = [
+                {"modality": mod_chosen, "i": i, "filling": partition["splitting"]["filling"], "le": partition["le"],
+                 "criteria": partition["criteria"]} for i, partition in
+                enumerate(partitions[mod_chosen]) if partition["le"] > 0]
 
-        # The partition must bring the modality from which they were created.
-        fillings = [
-            {"modality": modality, "i": i, "filling": partition["splitting"]["filling"], "le": partition["le"],
-             "criteria": partition["criteria"]} for modality in partitions.keys() for i, partition in
-            enumerate(partitions[modality]) if partition["le"] > 0]
+            final_answer = None
 
-        final_answer = None
+            if not fillings:
+                return None, partitions, None, None
 
-        if not fillings:
-            return None, partitions, None, None
+            # Minimum logical entropy among those. Minimum filling length among those. Get ALL entries matching both
+            min_le = min(x["le"] for x in fillings)
+            min_filling_len = min(len(x["filling"]) for x in fillings if x["le"] == min_le)
+            min_le_filling = [x for x in fillings if x["le"] == min_le and len(x["filling"]) == min_filling_len]
 
-        # Minimum logical entropy among those. Minimum filling length among those. Get ALL entries matching both
-        min_le = min(x["le"] for x in fillings)
-        min_filling_len = min(len(x["filling"]) for x in fillings if x["le"] == min_le)
-        min_le_filling = [x for x in fillings if x["le"] == min_le and len(x["filling"]) == min_filling_len]
+            # Count the amounts of criterias that where able to isolate the element in the set
+            criterias_filled = {}
+            for element in min_le_filling:
+                # Check if the elements fill considering the
+                criterias_filled[(element['i'], element['modality'])] = {"criterias_filled": 1,
+                                                                         "modality": element["modality"]}
+                for filling in fillings:
+                    if element["criteria"] != filling["criteria"]:
+                        for l in element["filling"]:
+                            if l in filling["filling"]:
+                                criterias_filled[(element["i"], element['modality'])]["criterias_filled"] += 1
 
-        # Count the amounts of criterias that where able to isolate the element in the set
-        criterias_filled = {}
-        for element in min_le_filling:
-            # Check if the elements fill considering the
-            criterias_filled[(element['i'], element['modality'])] = {"criterias_filled": 1,
-                                                                     "modality": element["modality"]}
-            for filling in fillings:
-                if element["criteria"] != filling["criteria"]:
-                    for l in element["filling"]:
-                        if l in filling["filling"]:
-                            criterias_filled[(element["i"], element['modality'])]["criterias_filled"] += 1
+            print(f"Minimum modality: {mod_chosen}. Min le filling: {min_le_filling}.")
+            return mod_chosen, partitions, min_le_filling, final_answer
 
-        if len(max_modalities) > 1:
-            modality = self.decide_answer_modality(model, question_text, max_modalities)
-        else:
-            # Find the index that has the maximum number of criterias filled
-            modality = criterias_filled[max(criterias_filled,
-                                            key=lambda k: criterias_filled[k]['criterias_filled'])]["modality"]
+        if not mod_chosen:
 
-        print(f"Minimum modality: {modality}. Min le filling: {min_le_filling}.")
-        return modality, partitions, min_le_filling, final_answer
+            average_le = average_modality_le(partitions)
+            filtered = {k: v for k, v in average_le.items() if v is not None}
+            max_value = max(filtered.values())
+            max_modalities = [k for k, v in filtered.items() if v == max_value]
+
+            print("Max modalities: ", max_modalities)
+
+            # The partition must bring the modality from which they were created.
+            fillings = [
+                {"modality": modality, "i": i, "filling": partition["splitting"]["filling"], "le": partition["le"],
+                 "criteria": partition["criteria"]} for modality in partitions.keys() for i, partition in
+                enumerate(partitions[modality]) if partition["le"] > 0]
+
+            final_answer = None
+
+            if not fillings:
+                return None, partitions, None, None
+
+            # Minimum logical entropy among those. Minimum filling length among those. Get ALL entries matching both
+            min_le = min(x["le"] for x in fillings)
+            min_filling_len = min(len(x["filling"]) for x in fillings if x["le"] == min_le)
+            min_le_filling = [x for x in fillings if x["le"] == min_le and len(x["filling"]) == min_filling_len]
+
+            # Count the amounts of criterias that where able to isolate the element in the set
+            criterias_filled = {}
+            for element in min_le_filling:
+                # Check if the elements fill considering the
+                criterias_filled[(element['i'], element['modality'])] = {"criterias_filled": 1,
+                                                                         "modality": element["modality"]}
+                for filling in fillings:
+                    if element["criteria"] != filling["criteria"]:
+                        for l in element["filling"]:
+                            if l in filling["filling"]:
+                                criterias_filled[(element["i"], element['modality'])]["criterias_filled"] += 1
+
+            if len(max_modalities) > 1:
+                print("the LLMs decides")
+                modality = self.decide_answer_modality(model, question_text, max_modalities)
+            else:
+                # Find the index that has the maximum number of criterias filled
+                print("The LLM does not decide")
+                modality = criterias_filled[max(criterias_filled,
+                                                key=lambda k: criterias_filled[k]['criterias_filled'])]["modality"]
+
+            print(f"Minimum modality: {modality}. Min le filling: {min_le_filling}.")
+            return modality, partitions, min_le_filling, final_answer
 
     def iscomparison(self, model, question_text):
         if model == "gpt-5.2":
@@ -1688,13 +1928,23 @@ Return only one between the {tied_modalities}.
                 final_answer = [sorted_results[0][1]] if sorted_results else []
 
         elif modality == "text":
+            print(f"Let's give answer from text: {question_text}")
+
             semantic_checks = []
             for filling in min_le_filling:
+                if 'old_criteria' in filling['criteria']:
+                    contextual_information = [filling['criteria']['old_criteria'],
+                                              filling['criteria']['conditional_criteria']]
+                else:
+                    contextual_information = [filling['criteria']]
+                # print(f"This is the criterias: {filling['criteria']}")
                 for paragraph in filling['filling']:
                     semantic_checks.append(
-                        self.check_answer_in_paragraph(model, answer_class_specific.lower(),
+                        self.check_answer_in_paragraph(model,
+                                                       answer_class_general.lower(),
                                                        question_text,
-                                                       paragraph))
+                                                       paragraph,
+                                                       contextual_information))
 
             print("Semantic checks: ", semantic_checks)
             sorted_results = sorted(semantic_checks, key=lambda x: (x[0], x[2]), reverse=True)
@@ -1807,7 +2057,7 @@ Return only one between the {tied_modalities}.
                         question_text,
                         best_item["splitting"]["filling"]['title'],  # the filling items
                         best_item["splitting"]["filling"]['text'],
-                        best_item["criteria"] # the criteria for this partition
+                        best_item["criteria"]  # the criteria for this partition
                     )
 
                 elif modality == "image":
@@ -1921,7 +2171,7 @@ Return only one between the {tied_modalities}.
         json.dump(multihop_partitions, open(multihop_partitions_path, "w"), indent=4)
         return multihop_partitions
 
-    def create_multi(self, model, question, multimodal_partitions, unimodal_partition,
+    def create_multi(self, model, question, question_text, multimodal_partitions, unimodal_partition,
                      conditional_modality, conditioned_modality, restricting_criterias):
 
         correct_elements = []
@@ -1936,10 +2186,11 @@ Return only one between the {tied_modalities}.
             elif conditioned_modality == "text":
                 print("Ci siamo con il testo")
                 print(f"Il testo è: {element}")
-                answer = self.analyse_text_restricting_criteria(model,
-                                                                restricting_criterias,
-                                                                element["title"],
-                                                                element["text"])
+                answer = self.analyse_text_bridge_element(model,
+                                                          question_text,
+                                                          element["title"],
+                                                          restricting_criterias,
+                                                          element["text"])
 
                 print(f"The answer is: {answer}")
             elif conditioned_modality == "table":
@@ -2030,19 +2281,23 @@ Return only one between the {tied_modalities}.
 
         if conditional_modality == "text":
             print("Vai col testo motherfucker")
-            #for filling in fillings_conditional_modality:
+            # for filling in fillings_conditional_modality:
             for id in element_mapping.keys():
                 restricting_criterias.append(self.extract_restricting_criteria_text(model, question_text,
-                                                                                    element_mapping[id]['el_filling']['title'],
-                                                                                    element_mapping[id]['el_filling']['text'],
+                                                                                    element_mapping[id]['el_filling'][
+                                                                                        'title'],
+                                                                                    element_mapping[id]['el_filling'][
+                                                                                        'text'],
                                                                                     element_mapping[id]['criterias']))
         elif conditional_modality == "image":
             print("Vai col image motherfucker")
-            #for filling in fillings_conditional_modality:
+            # for filling in fillings_conditional_modality:
             for id in element_mapping.keys():
                 restricting_criterias.append(self.extract_restricting_criteria_image(model, question_text,
-                                                                                     element_mapping[id]['el_filling']['title'],
-                                                                                     element_mapping[id]['el_filling']['path'],
+                                                                                     element_mapping[id]['el_filling'][
+                                                                                         'title'],
+                                                                                     element_mapping[id]['el_filling'][
+                                                                                         'path'],
                                                                                      element_mapping[id]['criterias']))
         elif conditional_modality == "table":
             document_title = valid_partitions_conditional_modality[0]["table_title"]
@@ -2050,14 +2305,18 @@ Return only one between the {tied_modalities}.
             table_description = valid_partitions_conditional_modality[0]["table_understanding"]
 
             print("Vai col table motherfucker")
-            #for filling in fillings_conditional_modality:
+            # for filling in fillings_conditional_modality:
             for id in element_mapping.keys():
-                restricting_criterias.append(self.extract_restricting_criteria_table_row(model, question_text,
+                print(f"id: {id}")
+                restricting_criterias.append(self.extract_restricting_criteria_table_row(model,
+                                                                                         question_text,
                                                                                          document_title,
                                                                                          table_name,
                                                                                          table_description,
-                                                                                         element_mapping[id]['el_filling'],
-                                                                                         element_mapping[id]['criterias']))
+                                                                                         element_mapping[id][
+                                                                                             'el_filling'],
+                                                                                         element_mapping[id][
+                                                                                             'criterias']))
 
         """
         for filling in fillings_conditional_modality:
@@ -2078,6 +2337,7 @@ Return only one between the {tied_modalities}.
             f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}")
         if os.path.exists(multimodal_partitions_path):
             multimodal_partitions = json.load(open(multimodal_partitions_path, "rb"))
+            return multimodal_partitions
         else:
             multimodal_partitions = {"image": [], "text": [], "table": []}
 
@@ -2098,7 +2358,10 @@ Return only one between the {tied_modalities}.
         print(f"Existing combinations: {existing_combinations}")
 
         for pair in non_empty_unimodal_pairs:
+            print(f"Vediamo cosa c'è: {pair}")
             if pair not in existing_combinations:
+                print(f"Non ci siamo proprio: {pair}")
+
                 conditional_modality = pair[0]
                 conditioned_modality = pair[1]
 
@@ -2115,7 +2378,7 @@ Return only one between the {tied_modalities}.
                         continue
                     else:
                         if restricting_criterias:
-                            self.create_multi(model, question, multimodal_partitions, unimodal_partition,
+                            self.create_multi(model, question, question_text, multimodal_partitions, unimodal_partition,
                                               conditional_modality, conditioned_modality, restricting_criterias)
                         else:
                             pass
@@ -2265,7 +2528,7 @@ Return only one between the {tied_modalities}.
         # if H1 == 0:
         #    return 0.0  # avoid division by zero
 
-        return (H2 - H1) / H1
+        return (H1 - H2) / H1
 
     def choose_unimodal_multimodal(self, unimodal_partitions_path, multimodal_partitions_path):
         """This method compares the entropy of unimodal partitions with the entropy of multimodal partitions and decides
@@ -2300,17 +2563,37 @@ Return only one between the {tied_modalities}.
             min_modality_multimodal = None
             min_value_multimodal = None
 
-        print(f"Min modality unimodal: {min_modality_multimodal}. Min value unimodal: {min_value_multimodal}")
+        print(f"Min modality multimodal: {min_modality_multimodal}. Min value multimodal: {min_value_multimodal}")
 
         if min_modality_multimodal is None:
             return "unimodal_partitions"
 
+        # We check whether any key that in unimodal was not None than became None. This is to check the importance of
+        # the order
+        if any(average_modality_le_unimodal[k] is not None and average_modality_le_multimodal.get(k) is None
+               for k in average_modality_le_unimodal):
+
+            relative_changes = {}
+            for mod in average_modality_le_unimodal.keys():
+                if average_modality_le_unimodal[mod] and average_modality_le_multimodal[mod]:
+                    relative_change = self.relative_entropy_change(average_modality_le_unimodal[mod],
+                                                                   average_modality_le_multimodal[mod])
+
+                    if relative_change > 0:
+                        relative_changes[mod] = relative_change
+
+            mod_max_relative_change = max(relative_changes, key=relative_changes.get)
+            print(f"Modality with max relative change and relative change: {mod_max_relative_change}, "
+                  f"{relative_changes[mod_max_relative_change]}")
+
+            return "multimodal_partitions", mod_max_relative_change
+
         if min_modality_unimodal == min_modality_multimodal:
             if average_modality_le_unimodal[min_modality_unimodal] < average_modality_le_multimodal[
                 min_modality_multimodal]:
-                return "unimodal_partitions"
+                return "unimodal_partitions", None
             else:
-                return "multimodal_partitions"
+                return "multimodal_partitions", None
 
         # Here we measure the average change of the logical entropy for the minimum modality in unimodal and for the
         # minimum modality in multimodal
@@ -2340,36 +2623,36 @@ Return only one between the {tied_modalities}.
                             average_modality_le_multimodal[min_modality_multimodal] > 0):
                         print("E siamo anche qui")
                         if change_minimum_unimodal < change_minimum_multimodal:
-                            return "unimodal_partitions"
+                            return "unimodal_partitions", None
                         elif change_minimum_multimodal < change_minimum_unimodal:
-                            return "multimodal_partitions"
+                            return "multimodal_partitions", None
                     elif (average_modality_le_multimodal[min_modality_unimodal] == 0 and
                           average_modality_le_multimodal[min_modality_multimodal] > 0):
-                        return "multimodal_partitions"
+                        return "multimodal_partitions", None
                     elif average_modality_le_multimodal[min_modality_unimodal] > 0 and average_modality_le_multimodal[
                         min_modality_multimodal] == 0:
-                        return "unimodal_partitions"
+                        return "unimodal_partitions", None
                     else:
-                        return "mannacc a miserj"
+                        return "mannacc a miserj", None
 
                 elif average_modality_le_multimodal[min_modality_unimodal] is None or average_modality_le_multimodal[
                     min_modality_multimodal] is None:
                     print("Uno dei due è Non")
                     if min_value_unimodal < min_value_multimodal:
-                        return "unimodal_partitions"
+                        return "unimodal_partitions", None
                     elif min_value_multimodal < min_value_unimodal:
-                        return "multimodal_partitions"
+                        return "multimodal_partitions", None
             else:
                 print("What are we taking about. It is impossible")
 
         elif not average_modality_le_unimodal[min_modality_unimodal] or not average_modality_le_unimodal[
             min_modality_multimodal]:
             if min_value_unimodal < min_value_multimodal:
-                return "unimodal_partitions"
+                return "unimodal_partitions", None
             elif min_value_multimodal < min_value_unimodal:
-                return "multimodal_partitions"
+                return "multimodal_partitions", None
             else:
-                return "unimodal_partitions"
+                return "unimodal_partitions", None
 
     def find_final_answer_boolean_table(self, model, question, question_text, partitions_path,
                                         election_modality, answers_dir):
@@ -2496,7 +2779,8 @@ Return only one between the {tied_modalities}.
                 print("WE START A UNIMODAL ANALYSIS")
                 print("***************************************************************")
                 if os.path.exists(multimodal_partitions_path):
-                    partitions_path = self.choose_unimodal_multimodal(unimodal_partitions_path, multimodal_partitions_path)
+                    partitions_path = self.choose_unimodal_multimodal(unimodal_partitions_path,
+                                                                      multimodal_partitions_path)
                 else:
                     partitions_path = "unimodal_partitions"
 
@@ -2513,9 +2797,14 @@ Return only one between the {tied_modalities}.
 
                 if final_answer is None:
                     print("Let's calculate the final answer")
-                    final_answer = self.find_final_answer(model, question, rewritten_question_text,
+                    final_answer = self.find_final_answer(model,
+                                                          question,
+                                                          rewritten_question_text,
                                                           answer_class_specific,
-                                                          answer_class_general, answers_dir, modality, partitions,
+                                                          answer_class_general,
+                                                          answers_dir,
+                                                          modality,
+                                                          partitions,
                                                           min_le_filling)
 
                 if final_answer is None:
@@ -2570,12 +2859,14 @@ Return only one between the {tied_modalities}.
                 print("***************************************************************")
                 print("Unimodal or Multimodal?")
                 print("***************************************************************")
-                partitions_path = self.choose_unimodal_multimodal(unimodal_partitions_path, multimodal_partitions_path)
+                partitions_path, mod_chosen = self.choose_unimodal_multimodal(unimodal_partitions_path,
+                                                                              multimodal_partitions_path)
                 print(f"Partitions path {partitions_path}")
                 print("***************************************************************")
                 print("Extracting the partitions")
                 modality, partitions, min_le_filling, final_answer = self.extract_partitions(model,
                                                                                              question,
+                                                                                             mod_chosen,
                                                                                              rewritten_question_text,
                                                                                              partitions_path)
                 print("***************************************************************")
@@ -2585,7 +2876,10 @@ Return only one between the {tied_modalities}.
                     print("Min le filling: ", min_le_filling)
                     final_answer = self.find_final_answer(model, question, rewritten_question_text,
                                                           answer_class_specific,
-                                                          answer_class_general, answers_dir, modality, partitions,
+                                                          answer_class_general,
+                                                          answers_dir,
+                                                          modality,
+                                                          partitions,
                                                           min_le_filling)
                     print("This is the final answer: ", final_answer)
 
