@@ -11,25 +11,18 @@ iteration = "iteration_1"
 
 
 def plot_results(responses, iteration):
-    print(responses)
     modalities = list(responses.keys())
-    accuracy = [
-        round(responses[m]['correct'] / (responses[m]['correct'] + responses[m]['incorrect']) * 100, 2)
-        for m in modalities
-    ]
-
-    print(accuracy)
-    print(np.mean(accuracy))
+    exact_matching = [responses[m] for m in modalities]
 
     # Plot
     plt.figure(figsize=(12, 5))
-    plt.bar(modalities, accuracy)
+    plt.bar(modalities, exact_matching)
 
     plt.xlabel("Modality")
-    plt.ylabel("Accuracy (%)")
+    plt.ylabel("Exact matching (%)")
     plt.title("Accuracy per Modality")
 
-    plt.yticks(np.arange(0, 101, 5))
+    plt.yticks(np.arange(0, 1, 5))
 
     plt.savefig(f'../figures/results_{iteration}.png')
     plt.show()
@@ -128,7 +121,7 @@ if __name__ == "__main__":
                 #    model_response = {response.replace("and ", "") for response in model_response}
                 if isinstance(model_response, list):
                     model_response = set(model_response)
-                    model_response = [m for m in model_response if m != 'NONE']
+                    model_response = [m.lower() for m in model_response if m != 'NONE']
                     model_response = {response.lower().replace("and ", "") for response in model_response}
 
                 print(f"Question text: {question_text}")
@@ -184,15 +177,15 @@ if __name__ == "__main__":
                             responses[modality]["incorrect"] += 1
 
                 elif len(answers_gt) > 1 and len(model_response) == 1:
+                    print("ci siamo o no?")
                     el_gt, el_model = ', '.join(sorted(answers_gt)), model_response.pop()
                     print(el_gt)
                     print(el_model)
                     if el_gt in el_model or el_model in el_gt:
-                        # print("Correct 4")
                         responses[modality]["correct"] += 1
                     else:
                         el_model = ', '.join(sorted(el_model.split(', ')))
-                        if el_gt == el_model:
+                        if el_gt == el_model or el_model in el_gt:
                             responses[modality]["correct"] += 1
                         else:
                             print("Not correct 5")
@@ -209,6 +202,22 @@ if __name__ == "__main__":
                 print("Not yet answered")
                 wrong[modality].append(question)
                 responses[modality]["incorrect"] += 1
+
+    responses = {key: round(responses[key]["correct"] / (responses[key]["correct"] + responses[key]["incorrect"]), 2)
+                 for key in responses}
+
+    print(f"Responses exact matching: {responses}")
+
+    unimodal_keys = ['image', 'text', 'table', 'table_table']
+    multimodal_keys = [k for k in responses if k not in unimodal_keys]
+
+    # Compute averages
+    unimodal_avg = sum(responses[k] for k in unimodal_keys) / len(unimodal_keys)
+    multimodal_avg = sum(responses[k] for k in multimodal_keys) / len(multimodal_keys)
+
+    print(f"Unimodal average: {unimodal_avg:.2f}")
+    print(f"Multimodal average: {multimodal_avg:.2f}")
+    print(f"Total average: {np.mean([unimodal_avg, multimodal_avg])}")
 
     plot_results(responses, iteration)
 

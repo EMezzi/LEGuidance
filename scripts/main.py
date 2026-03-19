@@ -68,8 +68,14 @@ if __name__ == "__main__":
     questions_list = questions_dataset.to_dict(orient="records")
     print(questions_list)
 
-    questions_list = [question for question in questions_list if question["index"] in ['question_13095.json',
-                                                                                       'question_1269.json']]
+    questions_list = [question for question in questions_list if question["index"] in ['question_22206.json']]
+                                                                                       #'question_1513.json',
+                                                                                       #'question_4111.json',
+                                                                                       #'question_14859.json',
+                                                                                       #'question_7323.json',
+                                                                                       #'question_8275.json',
+                                                                                       #'question_9411.json',
+                                                                                       #'question_15310.json']]
 
     print(questions_list)
     print(len(questions_list))
@@ -83,7 +89,7 @@ if __name__ == "__main__":
             # extract_criterias_main(model, client)
             agent = Agent(client, os.path.join(os.path.join(CRITERIA_EXTRACTION_DIR, model), "iteration_0"), MODALITIES)
             entropy_calculation_main(model, agent,
-                                     questions_list,
+                                     questions_list[0:1],
                                      QUESTIONS_MULTIMODALQA_TRAINING, ASSOCIATION_DIR, TABLE_DIR, FINAL_DATASET_IMAGES,
                                      os.path.join(f"{ANSWERS_DIR_TRAINING}/iteration_1", model))
 
@@ -98,51 +104,6 @@ if __name__ == "__main__":
 
         elif model == "google":
             GOOGLE_KEY = os.getenv("GOOGLE_KEY")
-        elif model == "deepseek-r1:8b":
-            print("Ci siamo alla singolarità")
-
-            NEBULA_BASE_URL = os.getenv("NEBULA_BASE_URL")
-            NEBULA_API_KEY = os.getenv('NEBULA_KEY')
-            client = OpenAI(base_url=NEBULA_BASE_URL, api_key=NEBULA_API_KEY)
-
-            get_nebula_models(client)
-
-            configs = {
-                "max_tokens": 200,
-                "temperature": 0.0,
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "personal_answer",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "country": {"type": "string"},
-                                "capital": {"type": "string"}
-                            },
-                            "required": ["country", "capital"],
-                            "additionalProperties": False
-                        }
-                    }
-                }
-            }
-
-            prompt_parameters = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": "You are an amazing guy"},
-                    {"role": "user", "content": "What is your name?"}
-                ],
-            }
-
-            prompt_parameters.update(configs)
-
-            print("SHOW ME")
-            print(prompt_parameters)
-
-            response = client.chat.completions.create(**prompt_parameters)
-
-            extract_criterias_main(model, client)
         elif model == "meta":
             pass
         elif model == "mistral":
