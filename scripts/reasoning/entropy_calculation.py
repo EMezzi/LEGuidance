@@ -1,13 +1,9 @@
-import os
-import time
-import json
-import base64
-import numpy as np
-
 from miscellaneous.pydantic_schemas import *
+from miscellaneous.utils import *
 
 from miscellaneous.prompt import (
-    system_prompt_image, user_prompt_image_text_input, user_prompt_image_image_input,
+    system_prompt_image, user_prompt_image_text, user_prompt_image_image,
+    system_prompt_image_bridge, user_prompt_image_bridge_text,
     system_prompt_text, user_prompt_text,
     system_prompt_table, user_prompt_table,
     system_prompt_row, user_prompt_row,
@@ -18,103 +14,11 @@ from miscellaneous.json_schemas import json_schema_check_criteria, json_schema_t
 iteration = 'iteration_1'
 
 
-def get_question_data(question_dir, question):
-    question_json = json.load(open(os.path.join(question_dir, question), "rb"))
-    question_text = question_json["question"]
-
-    images_doc_ids = question_json["metadata"]["image_doc_ids"]
-    text_doc_ids = question_json["metadata"]["text_doc_ids"]
-    table_id = question_json["metadata"]["table_id"]
-
-    return {"question_text": question_text, "image_doc_ids": images_doc_ids, "text_doc_ids": text_doc_ids,
-            "table_id": table_id}
-
-
-def detect_media_type_from_bytes(data: bytes) -> str:
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if data.startswith(b"\xff\xd8"):
-        return "image/jpeg"
-    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
-        return "image/gif"
-    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
-        return "image/webp"
-    raise ValueError("Unknown image format (not png/jpg/gif/webp)")
-
-
-def encode_image(image_path):
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-
-def get_question_files(association_dir, question):
-    question_json = json.load(open(os.path.join(association_dir, question), "rb"))
-
-    image_set = question_json["image_set"]
-    text_set = question_json["text_set"]
-    table_set = question_json["table_set"]
-
-    return {"image_set": image_set, "text_set": text_set, "table_set": table_set}
-
-
-def flatten_extend(matrix):
-    flat_list = []
-    for row in matrix:
-        if isinstance(row, list):
-            flat_list.extend(row)
-
-    return flat_list
-
-
-def create_association_qa(a, questions_dir, association_dir, image_dir, text_dir, table_dir):
-    for question in sorted(os.listdir(questions_dir)):
-        if question not in os.listdir(association_dir):
-            print("Question: ", question)
-            question_data = get_question_data(questions_dir, question)
-            print("Question data: ", question_data)
-            a.create_connection(question, question_data, image_dir, text_dir, table_dir, association_dir)
-
-
-def average_modality_le(partitions):
-    d = {}
-    for modality, items in partitions.items():
-        le_values = [item['le'] for item in items if "le" in item and item['le'] > 0]
-        if le_values:
-            d[modality] = sum(le_values) / len(le_values)
-        else:
-            d[modality] = None
-
-    return d
-
-
-class Agent:
+class LEAgent:
     def __init__(self, client, path_criterias, modalities):
         self.client = client
         self.path_criterias = path_criterias
         self.modalities = modalities
-
-    def create_connection(self, question, question_data, association_dir):
-        start_time = time.time()
-
-        all_data_json_object = json.load(
-            open("/Users/emanuelemezzi/PycharmProjects/multimodalqa/dataset/all_data.json", "rb"))
-
-        table_set = self.create_table_set(question_data, all_data_json_object["table"])
-        print("Table set: ", table_set)
-
-        image_set = self.create_image_set(question_data, all_data_json_object["image"])
-        print("Image set: ", image_set)
-
-        text_set = self.create_text_set(question_data, all_data_json_object["text"])
-        print("Text set: ", text_set)
-
-        print("--- %s seconds ---" % (time.time() - start_time))
-
-        d = {"image_set": image_set, "text_set": text_set, "table_set": table_set}
-
-        # Association between question and json files of the images, texts, and tables
-        with open(os.path.join(association_dir, question), "w") as json_file:
-            json.dump(d, json_file, indent=4)
 
     def read_criterias(self, question, unimodal):
         criteria_object = json.load(open(os.path.join(self.path_criterias, question), "rb"))
@@ -145,63 +49,11 @@ class Agent:
 
             return criterias
 
-    def create_image_set(self, question_data, all_data_images):
-        print("Create image set")
-        images = question_data["image_doc_ids"]
-        print("Images are: ", images)
-        answer_set_images = []
-
-        for image in images:
-            answer_set_images.append(all_data_images[image])
-
-        return answer_set_images
-
-    def create_text_set(self, question_data, all_data_text):
-        print("Create text set")
-        texts = question_data["text_doc_ids"]
-        answer_set_text = [all_data_text[text] for text in texts]
-
-        return answer_set_text
-
-    def create_table_set(self, question_data, all_data_table):
-
-        print("Create table set")
-        if isinstance(question_data["table_id"], str):
-            tables = [question_data["table_id"]]
-        elif isinstance(question_data["table_id"], list):
-            tables = question_data["table_id"]
-        else:
-            tables = None
-
-        print("Tables: ", tables)
-
-        # Since we do not want to mix rows from different tables
-        answer_set_tables = []
-
-        for table in tables:
-            table_json = all_data_table[table]
-
-            d = {table: None}
-            answer_set_rows = []
-            column_names = [el["column_name"] for el in table_json["table"]["header"]]
-            # Here we extract the rows of the table
-            for row in table_json["table"]["table_rows"]:
-                new_row = [{**cell, "header": header} for cell, header in zip(row, column_names)]
-                answer_set_rows.append(new_row)
-
-            d[table] = answer_set_rows
-            d["json"] = table_json["json"]
-            answer_set_tables.append(d)
-
-        return answer_set_tables
-
-    def analyse_image(self, model, criteria, metadata, image):
-        """This method checks whether an image can be separated from the others based on a specific criteria."""
-
+    def analyse_image_restricting_criteria(self, model, criteria, metadata, image_path):
         if model == "gpt-5.2":
             image64 = encode_image(
                 os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                             image["path"]))
+                             image_path))
 
             response = self.client.responses.parse(
                 model="gpt-5.2",
@@ -215,11 +67,11 @@ class Agent:
                         "content": [
                             {
                                 "type": "input_text",
-                                "text": user_prompt_image_text_input.format(metadata=metadata, criteria=criteria),
+                                "text": user_prompt_image_text.format(metadata=metadata, criteria=criteria)
                             },
                             {
                                 "type": "input_image",
-                                "image_url": user_prompt_image_image_input.format(image64=image64),
+                                "image_url": user_prompt_image_image.format(image64=image64),
                             },
                         ]
                     }
@@ -230,54 +82,7 @@ class Agent:
             found = response.output_parsed
             return found.answer
 
-        elif model == "claude-sonnet-4-5":
-            print("Image is: ", image["path"])
-
-            with open(os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                                   image["path"]), "rb") as f:
-                image_bytes = f.read()
-
-            media_type = detect_media_type_from_bytes(image_bytes)
-
-            image64 = encode_image(
-                os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                             image["path"]))  # base64.standard_b64encode(image_bytes).decode("utf-8")
-
-            response = self.client.messages.create(
-                model=model,
-                system=system_prompt_image,
-                max_tokens=1024,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": user_prompt_image_text_input.format(metadata=metadata, criteria=criteria),
-                            },
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": media_type,
-                                    "data": image64,
-                                }
-                            },
-                        ]
-                    }
-                ],
-                output_config={
-                    "format": {
-                        "type": "json_schema",
-                        "schema": json_schema_check_criteria
-                    }
-                }
-            )
-
-            found = json.loads(response.content[0].text)
-            return found["answer"]
-
-    def analyse_image_restricting_criteria(self, model, criteria, metadata, image_path):
+    def analyse_image_bridge_element(self, model, question_text, criteria, image_title, image_path):
         if model == "gpt-5.2":
             image64 = encode_image(
                 os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
@@ -288,37 +93,20 @@ class Agent:
                 input=[
                     {
                         "role": "system",
-                        "content": f"""You are a visual reasoning assistant.
-
-Your task is to determine whether a given IMAGE or its METADATA/TITLE contains visual evidence of any facts expressed in the CRITERIA.
-
-Rules:
-1) Only use what is directly visible in the image and the provided metadata/title text.
-2) Do NOT use external knowledge or assumptions.
-3) The image only needs to contain evidence of **any of the provided facts**, not the full original criteria.
-4) If at least one fact is present in the image or metadata, respond "yes". Otherwise, respond "no".
-
-Respond ONLY with "yes" or "no"."""
+                        "content": system_prompt_image_bridge
                     },
                     {
                         "role": "user",
                         "content": [
                             {
                                 "type": "input_text",
-                                "text": f"""
-Given:
-- Image TITLE/METADATA: '{metadata}'
-- CRITERIA: {criteria}
-
-Task:
-Determine whether the image or its metadata/title contains visual evidence of any facts expressed in the criteria.
-
-Answer "yes" if at least one fact is present, otherwise answer "no".
-""",
+                                "text": user_prompt_image_bridge_text.format(question_text=question_text,
+                                                                             criteria=criteria,
+                                                                             image_title=image_title)
                             },
                             {
                                 "type": "input_image",
-                                "image_url": user_prompt_image_image_input.format(image64=image64),
+                                "image_url": user_prompt_image_image.format(image64=image64),
                             },
                         ]
                     }
@@ -329,49 +117,31 @@ Answer "yes" if at least one fact is present, otherwise answer "no".
             found = response.output_parsed
             return found.answer
 
-    def analyse_text_bridge_element(self, model, question_text, title, criteria, text):
-        print("variables")
-        print(question_text)
-        print(criteria)
-        print(text)
-
+    def analyse_text_bridge_element(self, model, question_text, criteria, title, text):
         if model == "gpt-5.2":
             response = self.client.responses.parse(
                 model="gpt-5.2",
                 input=[
                     {
                         "role": "system",
-                        "content": f"""You are a reasoning assistant.
-
-You are given: 
-- A QUESTION
-- Two paragraphs: PARAGRAPH 1 AND PARAGRAPH 2
-
-Your task is to determine whether any entity, concept, or fact mentioned in PARAGRAPH 1 is also present in PARAGRAPH 2.
-
-Rules:
-1) Use only the text provided.
-2) Do NOT require full fact matching.
-3) If any shared entity, name, or concept (e.g., "Manchester United") appears in both paragraphs, respond "yes".
-
-Respond ONLY with "yes" or "no"."""
+                        "content": system_prompt_text
                     },
                     {
                         "role": "user",
                         "content": f"""QUESTION:
                         {question_text}
                         
-TITLE PARAGRAPH 1: 
-{title}
-
 PARAGRAPH 1: 
 {criteria}
+
+TITLE PARAGRAPH 2: 
+{title}
 
 PARAGRAPH 2:
 {text}
 
 Task:
-Determine whether any entity, concept, or fact mentioned in PARAGRAPH 1 is also present in PARAGRAPH 2..
+Determine whether any entity, concept, or fact mentioned in PARAGRAPH 1 is also present in PARAGRAPH 2.
 
 Answer "yes" or "no"."""
                     }
@@ -424,7 +194,60 @@ Respond ONLY with "yes" or "no"."""
             found = response.output_parsed
             return found.answer
 
-    def analyse_table_row_restricting_criteria(self, model, criteria, row, title, name, description):
+    def analyse_table_row_bridge_criteria(self, model, question_text, criteria, table_row, table_name,
+                                          table_description):
+        if model == "gpt-5.2":
+            response = self.client.responses.parse(
+                model="gpt-5.2",
+                input=[
+                    {
+                        "role": "system",
+                        "content": f"""You are a reasoning assistant.
+
+        You are given: 
+        - A QUESTION
+        - One PARAGRAPH, one TABLE NAME, one TABLE DESCRIPTION, one TABLE ROW 
+
+        Your task is to determine whether any entity, concept, or fact mentioned in the PARAGRAPH is also present in the TABLE ROW.
+
+        Rules:
+        1) Use only the text provided.
+        2) To understand the context consider the TABLE DESCRIPTION and TABLE NAME.
+        2) Do NOT require full fact matching.
+        3) If any shared entity, name, or concept appears in both the paragraph and the table row, respond "yes".
+
+        Respond ONLY with "yes" or "no"."""
+                    },
+                    {
+                        "role": "user",
+                        "content": f"""QUESTION:
+                                {question_text}
+
+        PARAGRAPH: 
+        {criteria}
+
+        TABLE NAME: 
+        {table_name}
+
+        TABLE DESCRIPTION:
+        {table_description}
+        
+        TABLE ROW: 
+        {table_row}
+
+        Task:
+        Determine whether any entity, concept, or fact mentioned in PARAGRAPH is also present in TABLE ROW.
+
+        Answer "yes" or "no"."""
+                    }
+                ],
+                text_format=AnswerContainsCriteria,
+            )
+
+            found = response.output_parsed
+            return found.answer
+
+    def analyse_table_row_restricting_criteria(self, model, criteria, row):
         if model == "gpt-5.2":
             response = self.client.responses.parse(
                 model="gpt-5.2",
@@ -464,7 +287,62 @@ Answer "yes" or "no".
             found = response.output_parsed
             return found.answer
 
-    def extract_restricting_criteria_text(self, model, question_text, title, text, characteristics):
+    def extract_restricting_criteria_text(self, model, question_text, title, text):
+        if model == "gpt-5.2":
+            response = self.client.responses.parse(
+                model="gpt-5.2",
+                input=[
+                    {
+                        "role": "system",
+                        "content": """You are a reasoning module for a multimodal question answering system.
+
+        Your task is to extract relevant information from this PARAGRAPH in relation to the QUESTION received. 
+
+        You are given:
+        - The QUESTION
+        - The PARAGRAPH TITLE
+        - The PARAGRAPH
+
+        Step 1 - Question analysis: 
+        - Given the QUESTION, the PARAGRAPH TITLE, and the PARAGRAPH check if the information in the PARAGRAPH is related to the QUESTION.
+
+        Step 2 - Evidence extraction: 
+        - If the PARAGRAPH contains information related to the QUESTION, create a short textual description of the PARAGRAPH taking into account the QUESTION. The description must be minimal and contain the entity/value that connects the PARAGRAPH to the QUESTION.
+
+        Guidelines:
+        - In the description only include information explicitly present in the paragraph.
+        - Do not infer unsupported facts.
+        - Be concise and precise.
+        """
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": f"""QUESTION:
+        {question_text}
+
+        PARAGRAPH TITLE:
+        {title}
+        
+        PARAGRAPH: 
+        {text}
+
+        Provide the relevant information according to the instructions.
+        """,
+                            }
+                        ]
+                    }
+                ],
+                text_format=ParagraphExtraction,
+            )
+
+            bridge_element = response.output_parsed
+            print(bridge_element)
+            return bridge_element.evidence
+
+    def extract_restricting_criteria_text_(self, model, question_text, title, text, characteristics):
         if model == "gpt-5.2":
             response = self.client.responses.parse(
                 model="gpt-5.2",
@@ -593,7 +471,7 @@ Provide the relevant information according to the instructions.
             return bridge_element.evidence
 
     def extract_restricting_criteria_table_row(self, model, question_text, document_title, table_name,
-                                               table_description, table_row, characteristics):
+                                               table_description, table_row):
         if model == "gpt-5.2":
             response = self.client.responses.parse(
                 model="gpt-5.2",
@@ -739,55 +617,6 @@ Provide the relevant information according to the instructions.
 
             found = json.loads(response.content[0].text)
             return found["description"]
-
-    def analyse_table_row(self, model, criteria, row, metadata, description):
-        """This method checks whether a table row can be separated from the others based on a specific criteria."""
-
-        # Split the search in the table in two phases. First you only do the splitting with the metadata, and then
-        # you try to do the partitioning with the rows
-
-        if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_row
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt_row.format(metadata=metadata, description=description, criteria=criteria,
-                                                          row=row)
-                    }
-                ],
-                text_format=AnswerContainsCriteria,
-            )
-
-            found = response.output_parsed
-            return found.answer
-
-        elif model == "claude-sonnet-4-5":
-            response = self.client.messages.create(
-                model=model,
-                system=system_prompt_row,
-                max_tokens=1024,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": user_prompt_row.format(metadata=metadata, description=description, criteria=criteria,
-                                                          row=row)
-                    }
-                ],
-                output_config={
-                    "format": {
-                        "type": "json_schema",
-                        "schema": json_schema_check_criteria
-                    }
-                }
-            )
-
-            found = json.loads(response.content[0].text)
-            return found["answer"]
 
     def decide_modality_llm(self, question, images, texts, table, table_dir, final_dataset_images):
         """This method decides the modality by showing the data to the LLM"""
@@ -1051,8 +880,7 @@ IMPORTANT:
 
             for row in rows:
                 # print(f"Row: {row}")
-                answer = self.analyse_table_row_restricting_criteria(model, criteria, row, table_title, table_name,
-                                                                     table_description)
+                answer = self.analyse_table_row_restricting_criteria(model, criteria, row)
                 # answer = self.analyse_table_row(model, criteria, row, table_title, table_description)
                 if answer.lower() == "yes":
                     correct_elements.append(row)
@@ -1521,7 +1349,63 @@ Return:
             found = response.output_parsed
             return found.is_yes_no, found.confidence
 
-    def logical_entropy(self, partition):
+    @staticmethod
+    def calculate_entropy_evolution(average_modality_le_unimodal, average_modality_le_multimodal,
+                                    modality_answers_given):
+        # min_modality_unimodal, min_value_unimodal = Agent.find_min(average_modality_le_unimodal)
+
+        # min_modality_multimodal, min_value_multimodal = Agent.find_min(average_modality_le_multimodal)
+
+        print(f"Average modality le unimodal: {average_modality_le_unimodal}, {average_modality_le_multimodal}")
+
+        modality_answers_given["unimodal_entropies"].append(average_modality_le_unimodal)
+        modality_answers_given["multimodal_entropies"].append(average_modality_le_multimodal)
+
+        print(modality_answers_given)
+
+        return average_modality_le_unimodal, average_modality_le_multimodal
+
+    @staticmethod
+    def values_different(v1, v2):
+        # Caso 1: uno è None e l'altro no → True
+        if (v1 is None) and v2 is not None:
+            return True
+
+        # Caso 2: uno è not None e l'altro è None -> False
+        if (v1 is not None) and v2 is None:
+            return False
+
+        # Caso 2: entrambi None → UGUALI
+        if v1 is None and v2 is None:
+            return False
+
+        # Caso 4: fallback normale
+        return v1 != v2
+
+    @staticmethod
+    def get_differences(prev, curr):
+        diffs = []
+        print(f"Prev is: {prev}")
+        keys = set(prev.keys())
+
+        for k in keys:
+            if LEAgent.values_different(prev.get(k), curr.get(k)):
+                diffs.append(k)
+
+        return diffs
+
+    @staticmethod
+    def find_min(average_le):
+        min_modality, min_value = None, None
+        if any(average_le[key] for key in average_le.keys()):
+            min_modality = min((k for k, v in average_le.items() if v is not None),
+                               key=lambda k: average_le[k])
+            min_value = average_le[min_modality]
+
+        return min_modality, min_value
+
+    @staticmethod
+    def logical_entropy(partition):
         """This method calculates the logical entropy, which depends on how the elements were split."""
         if len(partition) == 1:
             le = 1
@@ -1532,6 +1416,24 @@ Return:
             le = 1 - cumulative_prob
 
         return le if le > 0 or le < 1 else 1
+
+    @staticmethod
+    def update_answers(state, prev, curr, uni_multi):
+        for mod in LEAgent.get_differences(prev, curr):
+            if state[uni_multi].get(mod) is False:
+                state[uni_multi][mod] = True
+
+    @staticmethod
+    def average_modality_le(partitions):
+        d = {}
+        for modality, items in partitions.items():
+            le_values = [item['le'] for item in items if "le" in item and item['le'] > 0]
+            if le_values:
+                d[modality] = sum(le_values) / len(le_values)
+            else:
+                d[modality] = None
+
+        return d
 
     def decide_answer_modality(self, model, question_text, tied_modalities):
         if model == "gpt-5.2":
@@ -1579,7 +1481,6 @@ Return only one between the {tied_modalities}.
                  "rb"))
 
         if mod_chosen:
-            print("We are in mod chosen case")
             fillings = [
                 {"modality": mod_chosen, "i": i, "filling": partition["splitting"]["filling"], "le": partition["le"],
                  "criteria": partition["criteria"]} for i, partition in
@@ -1603,16 +1504,17 @@ Return only one between the {tied_modalities}.
                                                                          "modality": element["modality"]}
                 for filling in fillings:
                     if element["criteria"] != filling["criteria"]:
-                        for l in element["filling"]:
-                            if l in filling["filling"]:
+                        for el in element["filling"]:
+                            if el in filling["filling"]:
                                 criterias_filled[(element["i"], element['modality'])]["criterias_filled"] += 1
 
             print(f"Minimum modality: {mod_chosen}. Min le filling: {min_le_filling}.")
+
             return mod_chosen, partitions, min_le_filling, final_answer
 
         if not mod_chosen:
 
-            average_le = average_modality_le(partitions)
+            average_le = LEAgent.average_modality_le(partitions)
             filtered = {k: v for k, v in average_le.items() if v is not None}
             max_value = max(filtered.values())
             max_modalities = [k for k, v in filtered.items() if v == max_value]
@@ -1643,8 +1545,8 @@ Return only one between the {tied_modalities}.
                                                                          "modality": element["modality"]}
                 for filling in fillings:
                     if element["criteria"] != filling["criteria"]:
-                        for l in element["filling"]:
-                            if l in filling["filling"]:
+                        for el in element["filling"]:
+                            if el in filling["filling"]:
                                 criterias_filled[(element["i"], element['modality'])]["criterias_filled"] += 1
 
             if len(max_modalities) > 1:
@@ -1657,6 +1559,7 @@ Return only one between the {tied_modalities}.
                                                 key=lambda k: criterias_filled[k]['criterias_filled'])]["modality"]
 
             print(f"Minimum modality: {modality}. Min le filling: {min_le_filling}.")
+
             return modality, partitions, min_le_filling, final_answer
 
     def iscomparison(self, model, question_text):
@@ -1725,7 +1628,7 @@ Return FALSE if the question can be answered using only text or general knowledg
 Guidelines:
 - TRUE if the question refers to:
   - images, pictures, diagrams, maps, charts, graphs
-  - visual features (e.g., colors, shapes, layout, positions, race of a person through skin color)
+  - visual features (e.g., colors, shapes, layout, positions)
   - descriptions of covers, logos, symbols, or scenes
   - phrases like "shown in the image", "in the picture", "based on the chart"
 
@@ -1928,13 +1831,14 @@ Output:
                 print("best item is: ", best_item)
 
                 # Apply your restricting_criteria function
+                restricting_criterias = None
+
                 if modality == "text":
                     restricting_criterias = self.extract_restricting_criteria_text(
                         model,
                         question_text,
                         best_item["splitting"]["filling"]['title'],  # the filling items
-                        best_item["splitting"]["filling"]['text'],
-                        best_item["criteria"]  # the criteria for this partition
+                        best_item["splitting"]["filling"]['text']
                     )
 
                 elif modality == "image":
@@ -1942,8 +1846,7 @@ Output:
                         model,
                         question_text,
                         best_item["splitting"]["filling"]['title'],  # the filling items
-                        best_item["splitting"]["filling"]['path'],
-                        best_item["criteria"]  # the criteria for this partition
+                        best_item["splitting"]["filling"]['path']
                     )
 
                 elif modality == "table":
@@ -1951,7 +1854,6 @@ Output:
                         model,
                         question_text,
                         best_item["splitting"]["filling"],
-                        None,
                         None,
                         None,
                         None
@@ -1995,6 +1897,7 @@ Output:
                             print(l2)
 
                             for element in modality_set:
+                                answer = "no"
                                 if modality == "image":
                                     answer = self.analyse_image_restricting_criteria(model,
                                                                                      restricting_criterias,
@@ -2016,12 +1919,7 @@ Output:
                                             "/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/tables",
                                             table["json"]), "rb"))
                                     answer = self.analyse_table_row_restricting_criteria(model, restricting_criterias,
-                                                                                         element,
-                                                                                         json_table["title"],
-                                                                                         json_table["table"][
-                                                                                             "table_name"],
-                                                                                         partition[
-                                                                                             "table_understanding"])
+                                                                                         element)
 
                                 if answer.lower() == "yes":
                                     correct_elements.append(element)
@@ -2055,42 +1953,39 @@ Output:
         modality_set = unimodal_partition["splitting"]["filling"]
 
         for element in modality_set:
+            answer = "no"
+            print(f"The conditioned element is: {element}")
             if conditioned_modality == "image":
-                answer = self.analyse_image_restricting_criteria(model,
-                                                                 restricting_criterias,
-                                                                 element["title"],
-                                                                 element["path"])
+                answer = self.analyse_image_bridge_element(model,
+                                                           question_text,
+                                                           restricting_criterias,
+                                                           element["title"],
+                                                           element["path"])
+
             elif conditioned_modality == "text":
-                print("Ci siamo con il testo")
-                print(f"Il testo è: {element}")
                 answer = self.analyse_text_bridge_element(model,
                                                           question_text,
-                                                          element["title"],
                                                           restricting_criterias,
+                                                          element["title"],
                                                           element["text"])
 
-                print(f"The answer is: {answer}")
             elif conditioned_modality == "table":
-                print("Ci siamo con la tabella")
-                print(f"The row is: {element}")
-
                 association_json = json.load(open(
-                    os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/association",
-                                 question), "rb"))
+                    os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/association", question),
+                    "rb"))
                 table = association_json["table_set"][0].copy()
 
                 json_table = json.load(open(
-                    os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/tables",
-                                 table["json"]), "rb"))
-                answer = self.analyse_table_row_restricting_criteria(model,
-                                                                     restricting_criterias,
-                                                                     element,
-                                                                     json_table["title"],
-                                                                     json_table["table"]["table_name"],
-                                                                     unimodal_partition["table_understanding"])
+                    os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/tables", table["json"]),
+                    "rb"))
+                answer = self.analyse_table_row_bridge_criteria(model,
+                                                                question_text,
+                                                                restricting_criterias,
+                                                                element,
+                                                                json_table["table"]["table_name"],
+                                                                unimodal_partition["table_understanding"])
 
-                print(f"The answer is: {answer}")
-
+            print(f"The answer for the conditioned element is: {answer.lower()}")
             if answer.lower() == "yes":
                 correct_elements.append(element)
 
@@ -2109,16 +2004,14 @@ Output:
 
         multimodal_partitions[conditioned_modality].append(new_partition)
 
-    def return_restricting_criteria(self, model, question_text, unimodal_partitions, conditional_modality):
-        print("Let's first extract the restricting criteria")
-        print(f"The conditional modality is: {conditional_modality}")
+    def return_restricting_criteria(self, model, question, question_text, unimodal_partitions, conditional_modality):
 
         # Here we take all the partitions with logical entropy greater than 0
         valid_partitions_conditional_modality = [p for p in unimodal_partitions[conditional_modality] if p["le"] > 0 or
                                                  p['splitting']['filling']]
 
         if not valid_partitions_conditional_modality:
-            return []
+            return [], []
 
         # Here we have to create a dictionary that maps the elements with the criterias respected
 
@@ -2136,40 +2029,40 @@ Output:
                 if filling in partition["splitting"]["filling"]:
                     element_mapping[i]['criterias'].append(partition['criteria'])
 
+        old_criterias = []
         for id in element_mapping.keys():
-            print("El filling: ", element_mapping[id]['el_filling'])
-            print("El criterias: ", element_mapping[id]['criterias'])
+            # print("El filling: ", element_mapping[id]['el_filling'])
+            # print("El criterias: ", element_mapping[id]['criterias'])
+            old_criterias.extend(element_mapping[id]['criterias'])
 
-        """
-        filling_el_criterias = {}
-        for partition in valid_partitions_conditional_modality:
-            for el in partition["splitting"]["filling"]
+        if os.path.exists(
+                f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/restricting_criterias_extraction/{question}"):
 
-        criterias_conditional_modality = [p["criteria"] for p in valid_partitions_conditional_modality]
+            print("The restricting file already exist")
+            restricting_criterias_json = json.load(open(
+                f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/restricting_criterias_extraction/{question}",
+                "rb"))
 
-        fillings_conditional_modality = [item for p in valid_partitions_conditional_modality for item in
-                                         p.get("splitting", {}).get("filling", [])]
-        unique_filling = list(
-            {json.dumps(item, sort_keys=True): item for item in fillings_conditional_modality}.values())
-        fillings_conditional_modality = unique_filling
-        """
+            if conditional_modality in restricting_criterias_json:
+                print("The conditional modality already exists in it")
+                return restricting_criterias_json[conditional_modality], old_criterias
 
+        print("The restricting file does not exists")
         restricting_criterias = []
 
         if conditional_modality == "text":
-            print("Vai col testo motherfucker")
             # for filling in fillings_conditional_modality:
             for id in element_mapping.keys():
+                print(f"The element from which to extract the criteria is: {element_mapping[id]['el_filling']}")
                 restricting_criterias.append(self.extract_restricting_criteria_text(model, question_text,
                                                                                     element_mapping[id]['el_filling'][
                                                                                         'title'],
                                                                                     element_mapping[id]['el_filling'][
-                                                                                        'text'],
-                                                                                    element_mapping[id]['criterias']))
+                                                                                        'text']))
         elif conditional_modality == "image":
-            print("Vai col image motherfucker")
             # for filling in fillings_conditional_modality:
             for id in element_mapping.keys():
+                print(f"The element from which to extract the criteria is: {element_mapping[id]['el_filling']}")
                 restricting_criterias.append(self.extract_restricting_criteria_image(model, question_text,
                                                                                      element_mapping[id]['el_filling'][
                                                                                          'title'],
@@ -2180,30 +2073,37 @@ Output:
             table_name = valid_partitions_conditional_modality[0]["table_name"]
             table_description = valid_partitions_conditional_modality[0]["table_understanding"]
 
-            print("Vai col table motherfucker")
             # for filling in fillings_conditional_modality:
             for id in element_mapping.keys():
-                print(f"id: {id}")
+                print(f"The element from which to extract the criteria is: {element_mapping[id]['el_filling']}")
                 restricting_criterias.append(self.extract_restricting_criteria_table_row(model,
                                                                                          question_text,
                                                                                          document_title,
                                                                                          table_name,
                                                                                          table_description,
                                                                                          element_mapping[id][
-                                                                                             'el_filling'],
-                                                                                         element_mapping[id][
-                                                                                             'criterias']))
+                                                                                             'el_filling']))
 
-        """
-        for filling in fillings_conditional_modality:
-            restricting_criterias.append(self.extract_restricting_criteria(model, question_text, filling,
-                                                                           criterias_conditional_modality, el_type,
-                                                                           final_answer_class))
-        """
+        if os.path.exists(
+                f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/restricting_criterias_extraction/{question}"):
+            restricting_criterias_json = json.load(open(
+                f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/restricting_criterias_extraction/{question}",
+                "rb"))
 
-        return restricting_criterias
+            print("The file already exists but the conditional modality is enew")
+            restricting_criterias_json[conditional_modality] = restricting_criterias
 
-    def create_multimodal_partitions(self, model, question, question_text, final_answer_class):
+        else:
+            print("The file does not exists. We need to build it")
+            restricting_criterias_json = {conditional_modality: restricting_criterias}
+
+        json.dump(restricting_criterias_json, open(
+            f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/restricting_criterias_extraction/{question}",
+            "w"), indent=4)
+
+        return restricting_criterias, old_criterias
+
+    def create_multimodal_partitions(self, model, question, question_text):
         print("Salve buonasera come state?")
         unimodal_partitions_path = os.path.join(
             f"../results/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
@@ -2233,234 +2133,36 @@ Output:
         print(f"Existing combinations: {existing_combinations}")
 
         for pair in non_empty_unimodal_pairs:
-            print(f"Vediamo cosa c'è: {pair}")
             if pair not in existing_combinations:
-                print(f"Non ci siamo proprio: {pair}")
+                print(f"Vediamo cosa c'è: {pair}")
 
                 conditional_modality = pair[0]
                 conditioned_modality = pair[1]
 
                 print(f"Conditional modality: {conditional_modality}. Conditioned modality: {conditioned_modality}")
 
-                restricting_criterias = self.return_restricting_criteria(model, question_text, unimodal_partitions,
-                                                                         conditional_modality)
+                restricting_criterias, old_criterias = self.return_restricting_criteria(model,
+                                                                                        question,
+                                                                                        question_text,
+                                                                                        unimodal_partitions,
+                                                                                        conditional_modality)
 
                 restricting_criterias = [el for el in restricting_criterias if el is not None and el.lower() != 'none']
                 print(f"The restricting criterias are: {restricting_criterias}")
+                print(f"The old criterias are: {old_criterias}")
 
-                for unimodal_partition in unimodal_partitions[conditioned_modality]:
-                    if not unimodal_partition["splitting"]["filling"]:
-                        continue
-                    else:
-                        if restricting_criterias:
+                if restricting_criterias:
+                    for unimodal_partition in unimodal_partitions[conditioned_modality]:
+                        if unimodal_partition["splitting"]["filling"]:
+                            # if not restricting_criterias:
+                            #    restricting_criterias = old_criterias
+
+                            # print(f"The old restricting criterias are: {restricting_criterias}")
+
                             self.create_multi(model, question, question_text, multimodal_partitions, unimodal_partition,
                                               conditional_modality, conditioned_modality, restricting_criterias)
-                        else:
-                            pass
 
         return multimodal_partitions
-
-    def relative_entropy_change(self, H1, H2):
-        """
-        Calculate the signed relative change from H1 to H2.
-
-        Positive → increase (worse)
-        Negative → decrease (better)
-        Zero → no change
-        """
-
-        if H2 is None:
-            return H1  # treat missing value as no change
-        if H1 is None or H1 == 0:
-            return -H2
-        # if H1 == 0:
-        #    return 0.0  # avoid division by zero
-
-        return (H1 - H2) / H1
-
-    def choose_unimodal_multimodal(self, unimodal_partitions_path, multimodal_partitions_path, modality_answers_given):
-        """This method compares the entropy of unimodal partitions with the entropy of multimodal partitions and decides
-        whether the final answer will be given looking at unimodal partitions of multimodal partitions."""
-
-        print(f"modality answers given are: {modality_answers_given}")
-
-        unimodal_partitions = json.load(open(unimodal_partitions_path, "rb"))
-        multimodal_partitions = json.load(open(multimodal_partitions_path, "rb"))
-
-        # Here we gather the minimum element and le in unimodal
-        average_modality_le_unimodal = average_modality_le(unimodal_partitions)
-        print(f"Average modality le unimodal: {average_modality_le_unimodal}")
-
-        if any(average_modality_le_unimodal[key] for key in average_modality_le_unimodal.keys()):
-            min_modality_unimodal = min((k for k, v in average_modality_le_unimodal.items() if v is not None),
-                                        key=lambda k: average_modality_le_unimodal[k])
-            min_value_unimodal = average_modality_le_unimodal[min_modality_unimodal]
-        else:
-            min_modality_unimodal = None
-            min_value_unimodal = None
-
-        print(f"Min modality unimodal: {min_modality_unimodal}. Min value unimodal: {min_value_unimodal}")
-
-        # Here we gather the minimum element and le in multimodal
-        average_modality_le_multimodal = average_modality_le(multimodal_partitions)
-        print(f"Average modality le multimodal: {average_modality_le_multimodal}")
-
-        if any(average_modality_le_multimodal[key] for key in average_modality_le_multimodal.keys()):
-            min_modality_multimodal = min((k for k, v in average_modality_le_multimodal.items() if v is not None),
-                                          key=lambda k: average_modality_le_multimodal[k])
-            min_value_multimodal = average_modality_le_multimodal[min_modality_multimodal]
-        else:
-            min_modality_multimodal = None
-            min_value_multimodal = None
-
-        print(f"Min modality multimodal: {min_modality_multimodal}. Min value multimodal: {min_value_multimodal}")
-
-        if min_modality_multimodal is None:
-            return "unimodal_partitions", None
-
-        if any(average_modality_le_unimodal[k] is None and average_modality_le_multimodal.get(k) is not None for k in average_modality_le_unimodal):
-            return "multimodal_partitions", [modality for modality in average_modality_le_multimodal if average_modality_le_unimodal.get(modality) is None and average_modality_le_multimodal.get(modality) is not None][0]
-
-        # We check whether any key that in unimodal was not None than became None. This is to check the importance of
-        # the order
-        if any(average_modality_le_unimodal[k] is not None and average_modality_le_multimodal.get(k) is None
-               for k in average_modality_le_unimodal):
-
-            print("We are in this case")
-            relative_changes = {}
-            for mod in average_modality_le_unimodal.keys():
-                if average_modality_le_unimodal[mod] and average_modality_le_multimodal[mod]:
-                    relative_change = self.relative_entropy_change(average_modality_le_unimodal[mod],
-                                                                   average_modality_le_multimodal[mod])
-
-                    if relative_change > 0:
-                        relative_changes[mod] = relative_change
-
-            sorted_modalities = sorted(
-                relative_changes.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )
-
-            print(f"Sorted modalities are: {sorted_modalities}")
-
-            # Pick the best valid modality
-            mod_max_relative_change = None
-            for mod, change in sorted_modalities:
-                print(f"Mod: {mod}")
-                if mod in modality_answers_given:
-                    mod_max_relative_change = mod
-                    break
-
-            print(f"The mod max is: {mod_max_relative_change}")
-            if mod_max_relative_change is None:
-                return "unimodal_partitions", None
-
-            print(f"Modality with max relative change and relative change: {mod_max_relative_change}, "
-                  f"{relative_changes[mod_max_relative_change]}")
-
-            return "multimodal_partitions", mod_max_relative_change
-
-        else:
-            relative_changes = {}
-            for mod in average_modality_le_unimodal.keys():
-                if average_modality_le_unimodal[mod] and average_modality_le_multimodal[mod]:
-                    relative_change = self.relative_entropy_change(average_modality_le_unimodal[mod],
-                                                                   average_modality_le_multimodal[mod])
-
-                    if relative_change > 0:
-                        relative_changes[mod] = relative_change
-
-            if relative_changes:
-                sorted_modalities = sorted(
-                    relative_changes.items(),
-                    key=lambda x: x[1],
-                    reverse=True
-                )
-
-                # Pick the best valid modality
-                mod_max_relative_change = None
-                for mod, change in sorted_modalities:
-                    if mod in modality_answers_given:
-                        mod_max_relative_change = mod
-                        break
-
-                if mod_max_relative_change is None:
-                    return "unimodal_partitions", None
-
-                print(f"Modality with max relative change and relative change: {mod_max_relative_change}, "
-                      f"{relative_changes[mod_max_relative_change]}")
-
-                return "multimodal_partitions", mod_max_relative_change
-
-            else:
-                return "unimodal_partitions", None
-
-        if min_modality_unimodal == min_modality_multimodal:
-            if average_modality_le_unimodal[min_modality_unimodal] < average_modality_le_multimodal[
-                min_modality_multimodal]:
-                return "unimodal_partitions", None
-            else:
-                return "multimodal_partitions", None
-
-        # Here we measure the average change of the logical entropy for the minimum modality in unimodal and for the
-        # minimum modality in multimodal
-        change_minimum_unimodal = self.relative_entropy_change(average_modality_le_unimodal[min_modality_unimodal],
-                                                               average_modality_le_multimodal[min_modality_unimodal])
-
-        change_minimum_multimodal = self.relative_entropy_change(average_modality_le_unimodal[min_modality_multimodal],
-                                                                 average_modality_le_multimodal[
-                                                                     min_modality_multimodal])
-
-        print(change_minimum_unimodal, change_minimum_multimodal)
-
-        # Case in which both of them start greater than 0 meaning that the filling was not empty
-        if average_modality_le_unimodal[min_modality_unimodal] and average_modality_le_unimodal[
-            min_modality_multimodal]:
-            if (average_modality_le_unimodal[min_modality_unimodal] > 0 and
-                    average_modality_le_unimodal[min_modality_multimodal] > 0):
-                print("When unimodal they were both bigger than 0")
-                # Case in which they both conclude greater than 0, meaning that the filling in the multimodal is not
-                # empty for both of them (which means we did a combination within the same modality)
-
-                # In case they are both not None
-                if (average_modality_le_multimodal[min_modality_unimodal] and
-                        average_modality_le_multimodal[min_modality_multimodal]):
-                    print("ci siamo")
-                    if (average_modality_le_multimodal[min_modality_unimodal] > 0 and
-                            average_modality_le_multimodal[min_modality_multimodal] > 0):
-                        print("E siamo anche qui")
-                        if change_minimum_unimodal < change_minimum_multimodal:
-                            return "unimodal_partitions", None
-                        elif change_minimum_multimodal < change_minimum_unimodal:
-                            return "multimodal_partitions", None
-                    elif (average_modality_le_multimodal[min_modality_unimodal] == 0 and
-                          average_modality_le_multimodal[min_modality_multimodal] > 0):
-                        return "multimodal_partitions", None
-                    elif average_modality_le_multimodal[min_modality_unimodal] > 0 and average_modality_le_multimodal[
-                        min_modality_multimodal] == 0:
-                        return "unimodal_partitions", None
-                    else:
-                        return "mannacc a miserj", None
-
-                elif average_modality_le_multimodal[min_modality_unimodal] is None or average_modality_le_multimodal[
-                    min_modality_multimodal] is None:
-                    print("Uno dei due è Non")
-                    if min_value_unimodal < min_value_multimodal:
-                        return "unimodal_partitions", None
-                    elif min_value_multimodal < min_value_unimodal:
-                        return "multimodal_partitions", None
-            else:
-                print("What are we taking about. It is impossible")
-
-        elif not average_modality_le_unimodal[min_modality_unimodal] or not average_modality_le_unimodal[
-            min_modality_multimodal]:
-            if min_value_unimodal < min_value_multimodal:
-                return "unimodal_partitions", None
-            elif min_value_multimodal < min_value_unimodal:
-                return "multimodal_partitions", None
-            else:
-                return "unimodal_partitions", None
 
     def find_final_answer_boolean_table(self, model, question, question_text, partitions_path,
                                         election_modality, answers_dir):
@@ -2538,8 +2240,7 @@ Output:
         unimodal_partitions_path = os.path.join(
             f"../results/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
         unimodal_partitions = json.load(open(unimodal_partitions_path, "rb"))
-        multimodal_partitions = self.create_multimodal_partitions(model, question, question_text,
-                                                                  answer_class_specific.lower())
+        multimodal_partitions = self.create_multimodal_partitions(model, question, question_text)
 
         table_description = unimodal_partitions["table"][0]["table_understanding"]
 
@@ -2562,7 +2263,7 @@ Output:
             # Convert row into a canonical string
             row_key = json.dumps(row, sort_keys=True)
             if row_key not in seen:
-               seen.add(row_key)
+                seen.add(row_key)
 
         # This should basically contain the rows of the table that have been isolated from the image and from the text
         fillings_to_consider = [json.loads(el) for el in seen]
@@ -2590,6 +2291,268 @@ Output:
             return None
         else:
             return final_answer
+
+    @staticmethod
+    def relative_entropy_change(h1, h2):
+        """
+        Calculate the signed relative change from H1 to H2.
+
+        Positive → increase (worse)
+        Negative → decrease (better)
+        Zero → no change
+        """
+
+        if h2 is None:
+            return h1  # treat missing value as no change
+        if h1 is None or h1 == 0:
+            return -h2
+        # if H1 == 0:
+        #    return 0.0  # avoid division by zero
+
+        return (h1 - h2) / h1
+
+    @staticmethod
+    def choose_unimodal_multimodal(question, is_comparison, unimodal_partitions_path, multimodal_partitions_path,
+                                   modality_answers_given):
+        """This method compares the entropy of unimodal partitions with the entropy of multimodal partitions and decides
+        whether the final answer will be given looking at unimodal partitions of multimodal partitions."""
+
+        print(f"Modality answers given are: {modality_answers_given}")
+
+        average_modality_le_unimodal = None
+        if os.path.exists(unimodal_partitions_path):
+            unimodal_partitions = json.load(open(unimodal_partitions_path, "rb"))
+
+            # Here we gather the minimum element and le in unimodal
+            average_modality_le_unimodal = LEAgent.average_modality_le(unimodal_partitions)
+            print(f"Average modality le unimodal: {average_modality_le_unimodal}")
+
+        if os.path.exists(multimodal_partitions_path):
+            multimodal_partitions = json.load(open(multimodal_partitions_path, "rb"))
+
+        else:
+            valid = {mod: val for mod, val in average_modality_le_unimodal.items() if
+                     val is not None and modality_answers_given["unimodal_answers"].get(mod)}
+
+            min_mod = min(valid, key=valid.get)
+            return "unimodal_partitions", min_mod
+
+        average_modality_le_multimodal = LEAgent.average_modality_le(multimodal_partitions)
+        print(f"Average modality le multimodal: {average_modality_le_multimodal}")
+
+        print(f"Average le unimoda and multimosal: {average_modality_le_unimodal}, {average_modality_le_multimodal}")
+
+        LEAgent.calculate_entropy_evolution(average_modality_le_unimodal, average_modality_le_multimodal,
+                                          modality_answers_given)
+
+        print(average_modality_le_multimodal)
+        if len(modality_answers_given["unimodal_entropies"]) >= 2:
+            LEAgent.update_answers(modality_answers_given,
+                                 modality_answers_given["unimodal_entropies"][-2],
+                                 modality_answers_given["unimodal_entropies"][-1],
+                                 "unimodal_answers")
+
+            print(f"Updated: {modality_answers_given}")
+
+        if len(modality_answers_given["multimodal_entropies"]) >= 2:
+            LEAgent.update_answers(modality_answers_given,
+                                 modality_answers_given["multimodal_entropies"][-2],
+                                 modality_answers_given["multimodal_entropies"][-1],
+                                 "multimodal_answers")
+
+            print(f"Updated: {modality_answers_given}")
+
+        # In case there is a comparison we check first the ones for which there was a change in logical entropy
+        if is_comparison:
+            print("It's a comparison. We need to check the positive changes")
+            relative_changes = {}
+            for mod in average_modality_le_unimodal.keys():
+                if average_modality_le_unimodal[mod] and average_modality_le_multimodal[mod]:
+                    relative_change = LEAgent.relative_entropy_change(average_modality_le_unimodal[mod],
+                                                                    average_modality_le_multimodal[mod])
+
+                    if relative_change < 0:
+                        relative_changes[mod] = relative_change
+
+            print(f"Positive changes: {relative_changes}")
+            if relative_changes:
+                sorted_modalities = sorted(
+                    relative_changes.items(),
+                    key=lambda x: x[1],
+                    reverse=False
+                )
+
+                # Pick the best valid modality
+                mod_max_relative_change = None
+                for mod, change in sorted_modalities:
+                    if modality_answers_given["multimodal_answers"][mod]:
+                        mod_max_relative_change = mod
+                        break
+
+                if mod_max_relative_change is None:
+                    valid = {mod: val for mod, val in average_modality_le_unimodal.items() if
+                             val is not None and modality_answers_given["unimodal_answers"].get(mod)}
+
+                    if valid:
+                        min_mod = min(valid, key=valid.get)
+                        print(f"Unimodal mod min: {min_mod}")
+                        return "unimodal_partitions", min_mod
+                    else:
+                        valid_multimodal = {mod: val for mod, val in average_modality_le_multimodal.items() if
+                                            val is not None and modality_answers_given["multimodal_answers"].get(
+                                                mod)}
+
+                        if valid_multimodal:
+                            min_mod = min(valid_multimodal, key=valid_multimodal.get)
+                            print(f"Multimodal rule broken min: {min_mod}")
+                            return "multimodal_partitions", min_mod
+                        else:
+                            return None, None
+
+                print(f"Modality with max relative change and relative change: {mod_max_relative_change}, "
+                      f"{relative_changes[mod_max_relative_change]}")
+
+                return "multimodal_partitions", mod_max_relative_change
+
+        # Here we check whether there is any modality that is not False and thus that can be used
+        if any(v for v in modality_answers_given["unimodal_answers"].values()) or any(
+                v for v in modality_answers_given["multimodal_answers"].values()):
+
+            # We check the case in which any key that was None in unimodal became not None in multimodal.
+            if any(average_modality_le_unimodal[k] is None and average_modality_le_multimodal.get(k) is not None for k
+                   in average_modality_le_unimodal):
+
+                list_multi = [modality for modality in average_modality_le_multimodal if
+                              average_modality_le_unimodal.get(modality) is None and
+                              average_modality_le_multimodal.get(modality) is not None]
+
+                for mod in list_multi:
+                    if modality_answers_given["multimodal_answers"][mod]:
+                        return "multimodal_partitions", mod
+
+            # We check whether any key that in unimodal was not None than became None. This is to check the
+            # importance of the order.
+            if any(average_modality_le_unimodal[k] is not None and average_modality_le_multimodal.get(k) is None
+                   for k in average_modality_le_unimodal):
+
+                print("We are in this case")
+                relative_changes = {}
+                for mod in average_modality_le_unimodal.keys():
+                    if average_modality_le_unimodal[mod] and average_modality_le_multimodal[mod]:
+                        relative_change = LEAgent.relative_entropy_change(average_modality_le_unimodal[mod],
+                                                                        average_modality_le_multimodal[mod])
+
+                        if relative_change >= 0:
+                            relative_changes[mod] = relative_change
+
+                sorted_modalities = sorted(
+                    relative_changes.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+
+                print(f"Sorted modalities are: {sorted_modalities}")
+
+                # Pick the best valid modality
+                mod_max_relative_change = None
+                for mod, change in sorted_modalities:
+                    if modality_answers_given["multimodal_answers"][mod]:
+                        mod_max_relative_change = mod
+                        break
+
+                print(f"Multimodal mod min: {mod_max_relative_change}")
+                if mod_max_relative_change is None:
+                    valid = {mod: val for mod, val in average_modality_le_unimodal.items() if
+                             val is not None and modality_answers_given["unimodal_answers"].get(mod)}
+
+                    # Maybe here we have to break the rules
+                    if valid:
+                        min_mod = min(valid, key=valid.get)
+                        print(f"Unimodal mod min: {min_mod}")
+                        return "unimodal_partitions", min_mod
+                    else:
+
+                        valid_multimodal = {mod: val for mod, val in average_modality_le_multimodal.items() if
+                                            val is not None and modality_answers_given["multimodal_answers"].get(mod)}
+
+                        if valid_multimodal:
+                            min_mod = min(valid_multimodal, key=valid_multimodal.get)
+                            print(f"Multimodal rule broken min: {min_mod}")
+                            return "multimodal_partitions", min_mod
+                        else:
+                            return None, None
+
+                print(f"Modality with max relative change and relative change: {mod_max_relative_change}, "
+                      f"{relative_changes[mod_max_relative_change]}")
+
+                return "multimodal_partitions", mod_max_relative_change
+
+            else:
+                relative_changes = {}
+                for mod in average_modality_le_unimodal.keys():
+                    if average_modality_le_unimodal[mod] and average_modality_le_multimodal[mod]:
+                        relative_change = LEAgent.relative_entropy_change(average_modality_le_unimodal[mod],
+                                                                        average_modality_le_multimodal[mod])
+
+                        if relative_change >= 0:
+                            relative_changes[mod] = relative_change
+
+                if relative_changes:
+                    sorted_modalities = sorted(
+                        relative_changes.items(),
+                        key=lambda x: x[1],
+                        reverse=True
+                    )
+
+                    # Pick the best valid modality
+                    mod_max_relative_change = None
+                    for mod, change in sorted_modalities:
+                        if modality_answers_given["multimodal_answers"][mod]:
+                            mod_max_relative_change = mod
+                            break
+
+                    if mod_max_relative_change is None:
+                        valid = {mod: val for mod, val in average_modality_le_unimodal.items() if
+                                 val is not None and modality_answers_given["unimodal_answers"].get(mod)}
+
+                        if valid:
+                            min_mod = min(valid, key=valid.get)
+                            print(f"Unimodal mod min: {min_mod}")
+                            return "unimodal_partitions", min_mod
+                        else:
+                            valid_multimodal = {mod: val for mod, val in average_modality_le_multimodal.items() if
+                                                val is not None and modality_answers_given["multimodal_answers"].get(
+                                                    mod)}
+
+                            if valid_multimodal:
+                                min_mod = min(valid_multimodal, key=valid_multimodal.get)
+                                print(f"Multimodal rule broken min: {min_mod}")
+                                return "multimodal_partitions", min_mod
+                            else:
+                                return None, None
+
+                    print(f"Modality with max relative change and relative change: {mod_max_relative_change}, "
+                          f"{relative_changes[mod_max_relative_change]}")
+
+                    return "multimodal_partitions", mod_max_relative_change
+
+                else:
+                    valid = {mod: val for mod, val in average_modality_le_unimodal.items() if
+                             val is not None and modality_answers_given["unimodal_answers"].get(mod)}
+
+                    if valid:
+                        min_mod = min(valid, key=valid.get)
+                        print(f"Unimodal mod min: {min_mod}")
+                        return "unimodal_partitions", min_mod
+                    else:
+                        valid_multimodal = {mod: val for mod, val in average_modality_le_multimodal.items() if
+                                            val is not None and modality_answers_given["multimodal_answers"].get(mod)}
+                        if valid_multimodal:
+                            min_mod = min(valid_multimodal, key=valid_multimodal.get)
+                            print(f"Multimodal rule broken min: {min_mod}")
+                            return "multimodal_partitions", min_mod
+                        else:
+                            return None, None
 
     def return_final_answer(self, model, question, question_files, question_text, rewritten_question_text,
                             priority_modalities, criterias, remaining_modalities, answer_class_specific,
@@ -2633,9 +2596,7 @@ Output:
 
                     return
 
-        print(f"Question text: {question_text}")
         is_comparison, num_elements, confidence = self.iscomparison(model, question_text)
-
         print(f"Do we need a comparison? {is_comparison}, num_elements: {num_elements}")
 
         # We check whether a comparison is needed
@@ -2644,7 +2605,7 @@ Output:
             if len(priority_modalities) == 2:
                 # We check if analysing images is needed
                 is_graphical, confidence = self.isgraphical(model, question_text)
-                # If is_graphical is true and we have not yet inserted images in the modalities then we need to do
+                # If is_graphical is true, and we have not yet inserted images in the modalities then we need to do
                 # it, and we can proceed.
                 print(f"Do we need a graphical? {is_graphical}")
                 if is_graphical and 'image' not in priority_modalities:
@@ -2653,60 +2614,92 @@ Output:
                                                                        answers_dir, answer_class_specific, num_elements)
 
         multimodal = len(priority_modalities) > 1
-        modality_answers_given_multi = ["text", "table", "image"]
-        modality_answers_given_uni = ["text", "table", "image"]
 
-        while final_answer is None:
+        # This dictionary keeps whether we gave answers with a certain modality in unimodal or multimodal setting
+        # Moreover, it also keeps track of whether there were any changes in the unimodal average entropy and
+        # multimodal average entropy
+        modality_answers_given = {"unimodal_answers": {"text": True, "table": True, "image": True},
+                                  "multimodal_answers": {"text": True, "table": True, "image": True},
+                                  "unimodal_entropies": [],
+                                  "multimodal_entropies": []}
 
-            if not multimodal:
-                # Create multi-hop partitions only if the question is not directly unimodal
-                print(f"CREATING UNIMODAL MULTI-HOP PARTITIONS")
-                print("************************************************************************")
-                # self.create_multi_hop_partitions(model, question, question_text, answer_class_specific)
-                print("************************************************************************")
-                print(f"END CREATION")
-                print("************************************************************************\n")
+        if multimodal:
+            print("***************************************************************")
+            print("WE START A MULTIMODAL ANALYSIS")
+            print("***************************************************************")
+            # Here we create the multimodal partitions
+            multimodal_partitions_path = os.path.join(
+                f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}")
 
-                print("***************************************************************")
-                print("WE START A UNIMODAL ANALYSIS")
-                print("***************************************************************")
-                if os.path.exists(multimodal_partitions_path):
-                    partitions_path, mod_chosen = self.choose_unimodal_multimodal(unimodal_partitions_path,
-                                                                                  multimodal_partitions_path,
-                                                                                  modality_answers_given_uni)
-                else:
-                    partitions_path, mod_chosen = "unimodal_partitions", None
+            # if not os.path.exists(multimodal_partitions_path):
+            print("************************************************************************")
+            print(f"CREATING MULTIMODAL PARTITIONS")
+            multimodal_partitions = self.create_multimodal_partitions(model, question, rewritten_question_text)
 
-                print(f"The partitions path is: {partitions_path}")
-                modality, partitions, min_le_filling, final_answer = self.extract_partitions(model,
-                                                                                             question,
-                                                                                             mod_chosen,
-                                                                                             rewritten_question_text,
-                                                                                             partitions_path)
+            json.dump(multimodal_partitions,
+                      open(f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}",
+                           "w"), indent=4)
+            print("************************************************************************\n")
 
-                print("We are still in the moment of not being multimodal")
-                print(f"Modality: {modality}")
-                print(f"Partitions: {partitions}")
-                print(f"Min le filling: ", min_le_filling)
+        print(f"Final answer: {final_answer}")
+        print(modality_answers_given["unimodal_answers"].values())
+        print(modality_answers_given["multimodal_answers"].values())
 
-                if final_answer is None:
-                    print("Let's calculate the final answer")
-                    final_answer = self.find_final_answer(model,
-                                                          question,
-                                                          rewritten_question_text,
-                                                          answer_class_specific,
-                                                          answer_class_general,
-                                                          answers_dir,
-                                                          modality,
-                                                          partitions,
-                                                          min_le_filling,
-                                                          is_comparison,
-                                                          num_elements)
+        while (final_answer is None and (any(modality_answers_given["unimodal_answers"].values()) or
+                                         any(modality_answers_given["multimodal_answers"].values()))):
 
-                if final_answer is None:
-                    print("We were not able to find an answer. We have to chose another modality and go multimodal")
-                    # If there are still modalities to choose from we select one of them. For now, we select randomly.
-                    if remaining_modalities:
+            print(f"Modality answers given: {modality_answers_given}")
+            partitions_path, mod_chosen = self.choose_unimodal_multimodal(question, is_comparison,
+                                                                          unimodal_partitions_path,
+                                                                          multimodal_partitions_path,
+                                                                          modality_answers_given)
+            print(f"Modality answers given: {modality_answers_given}")
+
+            if partitions_path is None:
+                break
+
+            print(f"Partitions path {partitions_path}")
+            print("***************************************************************")
+            print("Extracting the partitions")
+            modality, partitions, min_le_filling, final_answer = self.extract_partitions(model,
+                                                                                         question,
+                                                                                         mod_chosen,
+                                                                                         rewritten_question_text,
+                                                                                         partitions_path)
+
+            print(f"The mod chosen is: {modality}")
+
+            if "unimodal" in partitions_path:
+                modality_answers_given["unimodal_answers"][modality] = False
+            else:
+                modality_answers_given["multimodal_answers"][modality] = False
+
+            json.dump(modality_answers_given,
+                      open(f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/entropy_evolution/{question}",
+                           "w"),
+                      indent=4)
+
+            print(f"Modality answers given are now this: {modality_answers_given}")
+            print("***************************************************************")
+
+            if final_answer is None:
+                print("Let's calculate the final answer")
+                final_answer = self.find_final_answer(model,
+                                                      question,
+                                                      rewritten_question_text,
+                                                      answer_class_specific,
+                                                      answer_class_general,
+                                                      answers_dir,
+                                                      modality,
+                                                      partitions,
+                                                      min_le_filling,
+                                                      is_comparison,
+                                                      num_elements)
+
+            if final_answer is None:
+                print("We need to find another modality!")
+                if remaining_modalities:
+                    if len(remaining_modalities) > 1:
                         decided_modality = self.decide_modality_reduced_data(question_text,
                                                                              remaining_modalities,
                                                                              question_files["image_set"],
@@ -2714,126 +2707,57 @@ Output:
                                                                              question_files["table_set"][0],
                                                                              table_dir,
                                                                              final_dataset_images)
-
-                        modalities_json = json.load(open(f"../results/modalities_predicted/{model}/{question}", "rb"))
-                        max_step = max([int(step.split('_')[1]) for step in modalities_json.keys()])
-                        modalities_json[f'step_{max_step + 1}'] = decided_modality
-
-                        json.dump(modalities_json,
-                                  open(os.path.join(f"../results/modalities_predicted/{model}/{question}"), "w"),
-                                  indent=4)
-
-                        remaining_modalities.remove(decided_modality)
-                        self.create_unimodal_partitions(model, question, question_files, table_dir, decided_modality,
-                                                        criterias)
-                        # self.create_multi_hop_partitions(model, question, question_text)
-                        multimodal = True
-
-            elif multimodal:
-                print("***************************************************************")
-                print("WE START A MULTIMODAL ANALYSIS")
-                print("***************************************************************")
-                # Here we create the multimodal partitions
-                multimodal_partitions_path = os.path.join(
-                    f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}")
-
-                # if not os.path.exists(multimodal_partitions_path):
-                print("************************************************************************")
-                print(f"CREATING MULTIMODAL PARTITIONS")
-                multimodal_partitions = self.create_multimodal_partitions(model, question, rewritten_question_text,
-                                                                          answer_class_specific)
-                json.dump(multimodal_partitions,
-                          open(f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}",
-                               "w"),
-                          indent=4)
-                print("************************************************************************\n")
-
-                unimodal_partitions_path = os.path.join(
-                    f"../results/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
-
-                # Here we choose whether to use unimodal or multimodal, depending from the value of the logical entropy
-                print("***************************************************************")
-                print("Unimodal or Multimodal?")
-                print("***************************************************************")
-                partitions_path, mod_chosen = self.choose_unimodal_multimodal(unimodal_partitions_path,
-                                                                              multimodal_partitions_path,
-                                                                              modality_answers_given_multi)
-                print(f"Partitions path {partitions_path}")
-                print("***************************************************************")
-                print("Extracting the partitions")
-                modality, partitions, min_le_filling, final_answer = self.extract_partitions(model,
-                                                                                             question,
-                                                                                             mod_chosen,
-                                                                                             rewritten_question_text,
-                                                                                             partitions_path)
-
-                print(f"The mod chosen is: {modality}")
-
-                modality_answers_given_multi.remove(modality)
-                print("***************************************************************")
-
-                if final_answer is None:
-                    print("Let's give this multimodal final answer")
-                    print("Min le filling: ", min_le_filling)
-                    final_answer = self.find_final_answer(model,
-                                                          question,
-                                                          rewritten_question_text,
-                                                          answer_class_specific,
-                                                          answer_class_general,
-                                                          answers_dir,
-                                                          modality,
-                                                          partitions,
-                                                          min_le_filling,
-                                                          is_comparison,
-                                                          num_elements)
-
-                    print("This is the final answer: ", final_answer)
-
-                if final_answer is None:
-                    print("We need to find another modality!")
-                    if remaining_modalities:
-                        if len(remaining_modalities) > 1:
-                            decided_modality = self.decide_modality_reduced_data(question_text,
-                                                                                 remaining_modalities,
-                                                                                 question_files["image_set"],
-                                                                                 question_files["text_set"],
-                                                                                 question_files["table_set"][0],
-                                                                                 table_dir,
-                                                                                 final_dataset_images)
-                        else:
-                            decided_modality = remaining_modalities[0]
-
-                        modalities_json = json.load(open(f"../results/modalities_predicted/{model}/{question}", "rb"))
-                        max_step = max([int(step.split('_')[1]) for step in modalities_json.keys()])
-                        modalities_json[f'step_{max_step + 1}'] = decided_modality
-
-                        json.dump(modalities_json, open(f"../results/modalities_predicted/{model}/{question}", "w"),
-                                  indent=4)
-
-                        remaining_modalities.remove(decided_modality)
-                        print("************************************************************************")
-                        print(f"CREATING UNIMODAL PARTITIONS for {decided_modality.upper()}")
-                        print("************************************************************************\n")
-                        self.create_unimodal_partitions(model, question, question_files, table_dir, decided_modality,
-                                                        criterias)
-
-                        self.create_multimodal_partitions(model, question, question_text, answer_class_specific.lower())
-
-                        if not remaining_modalities and is_comparison:
-                            final_answer = self.find_final_answer_comparison_three_modalities(model, question,
-                                                                                              rewritten_question_text,
-                                                                               answers_dir, answer_class_specific,
-                                                                               num_elements)
-
-                        """
-                        print("************************************************************************")
-                        print(f"CREATING MULTI-HOP PARTITIONS for {decided_modality.upper()}")
-                        print("************************************************************************\n")
-                        self.create_multi_hop_partitions(model, question, question_text)
-                        """
-
                     else:
-                        return "NONE"
+                        decided_modality = remaining_modalities[0]
+
+                    modalities_json = json.load(open(f"../results/modalities_predicted/{model}/{question}", "rb"))
+                    max_step = max([int(step.split('_')[1]) for step in modalities_json.keys()])
+                    modalities_json[f'step_{max_step + 1}'] = decided_modality
+
+                    json.dump(modalities_json, open(f"../results/modalities_predicted/{model}/{question}", "w"),
+                              indent=4)
+
+                    remaining_modalities.remove(decided_modality)
+                    print("************************************************************************")
+                    print(f"CREATING UNIMODAL PARTITIONS for {decided_modality.upper()}")
+                    print("************************************************************************\n")
+                    self.create_unimodal_partitions(model, question, question_files, table_dir, decided_modality,
+                                                    criterias)
+
+                    print("And now we create multimodal partitions.")
+                    multimodal_partitions = self.create_multimodal_partitions(model, question, question_text)
+
+                    json.dump(multimodal_partitions, open(
+                        f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}", "w"),
+                              indent=4)
+
+                    unimodal_partitions = json.load(
+                        open(f"../results/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}",
+                             "rb"))
+                    multimodal_partitions = json.load(
+                        open(f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}",
+                             "rb"))
+
+                    average_modality_le_unimodal = LEAgent.average_modality_le(unimodal_partitions)
+                    average_modality_le_multimodal = LEAgent.average_modality_le(multimodal_partitions)
+
+                    LEAgent.calculate_entropy_evolution(average_modality_le_unimodal, average_modality_le_multimodal,
+                                                      modality_answers_given)
+
+                    if not remaining_modalities and is_comparison:
+                        final_answer = self.find_final_answer_comparison_three_modalities(model, question,
+                                                                                          rewritten_question_text,
+                                                                                          answers_dir,
+                                                                                          answer_class_specific,
+                                                                                          num_elements)
+
+                        modality_answers_given["multimodal_answers"]["table"] = False
+
+                        json.dump(modality_answers_given,
+                                  open(
+                                      f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/entropy_evolution/{question}",
+                                      "w"),
+                                  indent=4)
 
     def answer_question(self, model, question, question_data, question_files, table_dir, final_dataset_images,
                         answers_dir):
@@ -2895,8 +2819,6 @@ def answer_qa(model, agent, questions_list, questions_dir, association_dir, tabl
     os.makedirs(answers_dir, exist_ok=True)
     os.makedirs(f"../results/partitions/unimodal_partitions/{iteration}/{model}/", exist_ok=True)
 
-    print("ciao")
-
     for i, q in enumerate(questions_list):
         question = q["index"]
         modalities = q["modality"]
@@ -2926,14 +2848,3 @@ def entropy_calculation_main(model, agent, questions_list, questions_dir, associ
 
     answer_qa(model, agent, questions_list, questions_dir, association_dir, table_dir, final_dataset_images,
               answers_dir)
-
-
-def make_hashable(obj):
-    if isinstance(obj, dict):
-        return tuple(sorted((k, make_hashable(v)) for k, v in obj.items()))
-    elif isinstance(obj, list):
-        return tuple(make_hashable(x) for x in obj)
-    elif isinstance(obj, tuple):
-        return tuple(make_hashable(x) for x in obj)
-    else:
-        return obj
