@@ -166,7 +166,6 @@ def extract_criterias(model, client, question_text, question, criteria_extractio
         save_json_file(distinction_criterias, question, question_text, criteria_extraction_dir, model, iteration)
 
     elif model == "claude-sonnet-4-5":
-        print("Ci piace ancora di più")
         response = client.messages.create(
             model=model,
             max_tokens=1024,
@@ -189,7 +188,6 @@ def extract_criterias(model, client, question_text, question, criteria_extractio
         save_json_file(distinction_criterias, question, question_text, criteria_extraction_dir, model, iteration)
 
     elif model == "deepseek-r1:8b":
-        print("Eccoci qua")
         """
         configs = {
             "max_tokens": 200,
@@ -224,7 +222,6 @@ def extract_criterias(model, client, question_text, question, criteria_extractio
             }
         }
 
-        print("Vediamo questo bel prompt")
         print(user_prompt_criteria.format(question_text=question_text))
 
         prompt_parameters = {

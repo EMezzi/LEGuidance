@@ -11,6 +11,7 @@ from prompts.le.prompt_check_answer import *
 
 iteration = 'iteration_1'
 
+
 class LEAgent:
     def __init__(self, client, path_criterias, modalities):
         self.client = client
