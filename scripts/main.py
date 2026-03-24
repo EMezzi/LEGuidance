@@ -1,13 +1,16 @@
 import os
 import ast
+import json
+import boto3
 import random
 import anthropic
-import pandas as pd
-import pickle as pk
 from openai import OpenAI
 from dotenv import load_dotenv
-from criteria_extraction import extract_criterias_main
-from entropy_calculation import entropy_calculation_main, Agent
+from miscellaneous.utils import dataset_build, get_questions
+from reasoning.criteria_extraction import extract_criterias_main
+from direct_prompting.dp import dp_main, DirectPrompting
+from reasoning.entropy_calculation import entropy_calculation_main, LEAgent
+from botocore.exceptions import ClientError
 
 
 def get_nebula_models(client):
@@ -17,28 +20,163 @@ def get_nebula_models(client):
     return models
 
 
-def dataset_build(dataset):
-    image_rows = dataset[dataset["modality"].astype(str) == "['image']"].sample(20, random_state=42)
-    text_rows = dataset[dataset["modality"].astype(str) == "['text']"].sample(20, random_state=42)
-    table_rows = dataset[dataset["modality"].astype(str) == "['table']"].sample(20, random_state=42)
+def get_inference_profiles():
+    # Initialize the Bedrock client
+    # Replace 'us-east-1' with your active region
 
-    image_text_rows = dataset[dataset["modality"].astype(str) == "['image', 'text']"].sample(20, random_state=42)
-    text_image_rows = dataset[dataset["modality"].astype(str) == "['text', 'image']"].sample(20, random_state=42)
-    image_table_rows = dataset[dataset["modality"].astype(str) == "['image', 'table']"].sample(20, random_state=42)
-    table_image_rows = dataset[dataset["modality"].astype(str) == "['table', 'image']"].sample(20, random_state=42)
+    client = boto3.client(
+        "bedrock",
+        region_name="us-west-2",
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+    )
 
-    text_table_rows = dataset[dataset["modality"].astype(str) == "['text', 'table']"].sample(20, random_state=42)
-    table_text_rows = dataset[dataset["modality"].astype(str) == "['table', 'text']"].sample(20, random_state=42)
+    bedrock = client
 
-    table_table_rows = dataset[dataset["modality"].astype(str) == "['table', 'table']"].sample(20, random_state=42)
+    """
+    try:
+        # This command ONLY works with the "bedrock" client
+        response = bedrock.list_inference_profiles(typeEquals='SYSTEM_DEFINED')
 
-    test_dataset = pd.concat(
-        [image_rows, text_rows, table_rows, image_text_rows, text_image_rows, image_table_rows, table_image_rows,
-         text_table_rows, table_text_rows, table_table_rows]) \
-        .sample(frac=1, random_state=42) \
-        .reset_index(drop=False)
+        profiles = response.get('inferenceProfileSummaries', [])
 
-    return test_dataset
+        print(f"{'Profile Name':<40} | {'Inference Profile ID':<40}")
+        print("-" * 85)
+
+        for profile in profiles:
+            print(f"{profile['inferenceProfileName']:<40} | {profile['inferenceProfileId']:<40}")
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+    """
+
+    try:
+        # List the inference profiles
+        response = bedrock.list_inference_profiles()
+
+        print("Available Inference Profiles:")
+        for profile in response.get('inferenceProfileSummaries', []):
+            print(
+                f"Name: {profile.get('inferenceProfileName')} ID: {profile.get('inferenceProfileId')} Status: {profile.get('status')}")
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+def amazon_mistral(client):
+    """
+    response = client.invoke_model(
+        modelId='mistral.mistral-large-3-675b-instruct',
+        body=json.dumps({
+            'messages': [{'role': 'user', 'content': 'Can you explain the features of Amazon Bedrock?'}],
+            'max_tokens': 1024
+        })
+    )
+    print(json.loads(response['body'].read()))
+
+    response = client.invoke_model(
+        modelId='us.anthropic.claude-sonnet-4-6',
+        body=json.dumps({
+            'anthropic_version': 'bedrock-2023-05-31',  # Required field
+            'messages': [{'role': 'user', 'content': 'Can you explain the features of Amazon Bedrock?'}],
+            'max_tokens': 1024
+        })
+    )
+    print(json.loads(response['body'].read()))
+    """
+
+    # Amazon
+    body = json.dumps({
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"text": "Can you explain the features of Amazon Bedrock?"}]
+            }
+        ],
+        "inferenceConfig": {
+            "maxTokens": 1024
+        }
+    })
+
+    response = client.invoke_model(
+        modelId='us.amazon.nova-premier-v1:0',
+        body=body
+    )
+
+    print(json.loads(response['body'].read()))
+
+    # Nvidia
+    response = client.invoke_model(
+        modelId='nvidia.nemotron-nano-12b-v2',
+        body=json.dumps({
+            'messages': [{'role': 'user', 'content': 'Can you explain the features of Amazon Bedrock?'}],
+            'max_tokens': 1024
+        })
+    )
+    print(json.loads(response['body'].read()))
+
+    # Qwen
+    response = client.invoke_model(
+        modelId='qwen.qwen3-vl-235b-a22b',
+        body=json.dumps({
+            'messages': [{'role': 'user', 'content': 'Can you explain the features of Amazon Bedrock?'}],
+            'max_tokens': 1024
+        })
+    )
+    print(json.loads(response['body'].read()))
+
+    print("Kimi")
+    response = client.invoke_model(
+        modelId='moonshotai.kimi-k2.5',
+        body=json.dumps({
+            'messages': [{'role': 'user', 'content': 'Can you explain the features of Amazon Bedrock?'}],
+            'max_tokens': 1024
+        })
+    )
+    print(json.loads(response['body'].read()))
+
+    print("Gemma")
+    response = client.invoke_model(
+        modelId='google.gemma-3-27b-it',
+        body=json.dumps({
+            'messages': [{'role': 'user', 'content': 'Can you explain the features of Amazon Bedrock?'}],
+            'max_tokens': 1024
+        })
+    )
+    print(json.loads(response['body'].read()))
+
+
+def import_directories(dataset, setting):
+    if dataset == "multimodalqa":
+        IMAGE_DIR = os.getenv("IMAGE_DIR")
+        TEXT_DIR = os.getenv("TEXT_DIR")
+        TABLE_DIR = os.getenv("TABLE_DIR")
+        FINAL_DATASET_IMAGES = os.getenv("FINAL_DATASET_IMAGES")
+
+        ASSOCIATION_DIR = os.getenv("ASSOCIATION_DIR")
+
+        QUESTIONS_DIR = os.getenv(f"QUESTIONS_MULTIMODALQA_{setting.upper()}")
+        CRITERIA_DIR = os.getenv(f"CRITERIA_MULTIMODALQA_{setting.upper()}")
+        ANSWERS_DIR = os.getenv(f"ANSWERS_MULTIMODALQA_{setting.upper()}")
+
+        return IMAGE_DIR, TEXT_DIR, TABLE_DIR, FINAL_DATASET_IMAGES, ASSOCIATION_DIR, QUESTIONS_DIR, CRITERIA_DIR, ANSWERS_DIR
+
+    elif dataset == "manymodalqa":
+        QUESTIONS_DIR = os.getenv(f"QUESTIONS_MANYMODALQA_{setting.upper()}")
+        IMAGE_DIR = os.getenv(f"QUESTIONS_MANYMODALQA_IMAGES")
+
+        CRITERIA_DIR = os.getenv(f"CRITERIA_MANYMODALQA_{setting.upper()}")
+        ANSWERS_DIR = os.getenv(f"ANSWERS_MANYMODALQA_{setting.upper()}")
+
+        return QUESTIONS_DIR, IMAGE_DIR, CRITERIA_DIR, ANSWERS_DIR
+
+
+def import_bedrock_credentials():
+    aws_access_key_id = os.getenv("aws_access_key_id")
+    aws_secret_access_key = os.getenv("aws_secret_access_key")
+
+    return aws_access_key_id, aws_secret_access_key
 
 
 if __name__ == "__main__":
@@ -47,38 +185,47 @@ if __name__ == "__main__":
     random.seed(42)
     iteration = "iteration_0"
 
+    dataset, setting = "multimodalqa", "training"
     models = ["gpt-5.2"]
+    approach = "dp"
+    approaches = ["dp", "cot", "le"]
 
     MODALITIES = ast.literal_eval(os.getenv("MODALITIES", "[]"))
 
-    QUESTIONS_MULTIMODALQA_TRAINING = os.getenv("QUESTIONS_MULTIMODALQA_TRAINING")
-    IMAGE_DIR = os.getenv("IMAGE_DIR")
-    TEXT_DIR = os.getenv("TEXT_DIR")
-    TABLE_DIR = os.getenv("TABLE_DIR")
-    FINAL_DATASET_IMAGES = os.getenv("FINAL_DATASET_IMAGES")
+    """Import directories"""
+    if dataset == "multimodalqa":
+        (IMAGE_DIR, TEXT_DIR, TABLE_DIR, FINAL_DATASET_IMAGES, ASSOCIATION_DIR, QUESTIONS_DIR, CRITERIA_DIR,
+         ANSWERS_DIR) = import_directories(dataset, setting)
 
-    ASSOCIATION_DIR = os.getenv("ASSOCIATION_DIR")
-    CRITERIA_EXTRACTION_DIR = os.getenv("CRITERIA_EXTRACTION_DIR")
-    ANSWERS_DIR_TRAINING = os.getenv("ANSWERS_DIR_TRAINING")
+    elif dataset == "manymodalqa":
+        QUESTIONS_DIR, IMAGE_DIR, CRITERIA_DIR, ANSWERS_DIR = import_directories(dataset, setting)
 
-    dataset = pk.load(open("./modality_selection/tree_dataset.pkl", "rb"))
+    """Import access keys for amazon"""
+    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY = import_bedrock_credentials()
+    client = boto3.client(
+        "bedrock-runtime",
+        region_name="us-west-2",
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+    )
 
-    questions_dataset = dataset_build(dataset)
-    print(questions_dataset)
-    questions_list = questions_dataset.to_dict(orient="records")
-    print(questions_list)
+    get_inference_profiles()
+    amazon_mistral(client)
 
-    questions_list = [question for question in questions_list if question["index"] in ['question_22206.json']]
-                                                                                       #'question_1513.json',
-                                                                                       #'question_4111.json',
-                                                                                       #'question_14859.json',
-                                                                                       #'question_7323.json',
-                                                                                       #'question_8275.json',
-                                                                                       #'question_9411.json',
-                                                                                       #'question_15310.json']]
+    """Answering process begins"""
+    questions_list = get_questions()
 
-    print(questions_list)
-    print(len(questions_list))
+    if approach == "dp":
+        dp_agent = DirectPrompting()
+        for model in models:
+            dp_main(model, dp_agent, questions_list, QUESTIONS_DIR, ASSOCIATION_DIR, TABLE_DIR, FINAL_DATASET_IMAGES,
+                    os.path.join(f"{ANSWERS_DIR}/iteration_1", model))
+
+    elif approach == "cot":
+        cot_agent = ChainOfThought()
+        for model in models:
+            dp_main(mode)
+
 
     for model in models:
         if model == "gpt-5.2":
@@ -87,24 +234,35 @@ if __name__ == "__main__":
             OPENAI_KEY = os.getenv("OPENAI_KEY")
             client = OpenAI(api_key=OPENAI_KEY)
             # extract_criterias_main(model, client)
-            agent = Agent(client, os.path.join(os.path.join(CRITERIA_EXTRACTION_DIR, model), "iteration_0"), MODALITIES)
+            agent = LEAgent(client, os.path.join(os.path.join(CRITERIA_DIR, model), "iteration_0"), MODALITIES)
             entropy_calculation_main(model, agent,
                                      questions_list[0:1],
-                                     QUESTIONS_MULTIMODALQA_TRAINING, ASSOCIATION_DIR, TABLE_DIR, FINAL_DATASET_IMAGES,
-                                     os.path.join(f"{ANSWERS_DIR_TRAINING}/iteration_1", model))
+                                     QUESTIONS_DIR, ASSOCIATION_DIR, TABLE_DIR, FINAL_DATASET_IMAGES,
+                                     os.path.join(f"{ANSWERS_DIR}/iteration_1", model))
 
-        elif model == "claude-sonnet-4-5":
+        elif model == "claude-sonnet-4-6":
+            pass
+        elif model == "mistral-large-3":
+            pass
+        elif model == "nova-premier-v1:0":
+            pass
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            pass
+        elif model == "qwen3-vl-235b-a22b":
+            pass
+        elif model == "kimi-k2.5":
+            pass
+        elif model == "gemma-3-27b-it":
+            pass
+
+
+        """
+        elif model == "claude-sonnet-4-6":
             print("Vai con anthropic che ci piace")
             CLAUDE_KEY = os.getenv("ANTHROPIC_API_KEY")
             client = anthropic.Anthropic()
             # extract_criterias_main(model, client)
-            agent = Agent(client, os.path.join(os.path.join(CRITERIA_EXTRACTION_DIR, model), "iteration_0"), MODALITIES)
-            entropy_calculation_main(model, agent, MODALITIES, QUESTIONS_MULTIMODALQA_TRAINING, ASSOCIATION_DIR,
-                                     IMAGE_DIR, TEXT_DIR, TABLE_DIR, os.path.join(ANSWERS_DIR_TRAINING, model))
-
-        elif model == "google":
-            GOOGLE_KEY = os.getenv("GOOGLE_KEY")
-        elif model == "meta":
-            pass
-        elif model == "mistral":
-            pass
+            agent = LEAgent(client, os.path.join(os.path.join(CRITERIA_DIR, model), "iteration_0"), MODALITIES)
+            entropy_calculation_main(model, agent, MODALITIES, QUESTIONS_DIR, ASSOCIATION_DIR,
+                                     IMAGE_DIR, TEXT_DIR, TABLE_DIR, os.path.join(ANSWERS_DIR, model))
+        """

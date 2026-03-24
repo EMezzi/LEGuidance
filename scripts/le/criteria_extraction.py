@@ -1,14 +1,16 @@
 from __future__ import annotations
-from miscellaneous.prompt import system_prompt_criteria, user_prompt_criteria
-from miscellaneous.json_schemas import json_schema_extraction_criteria
+
+import os
+import json
+import random
 import pickle as pk
 from collections import Counter
 
-import json
-import os
+from prompts.le.prompt_criteria_extraction import system_prompt_criteria, user_prompt_criteria
+from schemas.json_schemas import json_schema_extraction_criteria
+
 from typing import Literal, Optional, List
 from pydantic import BaseModel, Field
-import random
 from dotenv import load_dotenv
 
 # ---- Enums / literals ----

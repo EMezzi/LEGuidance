@@ -11,19 +11,25 @@ iteration = "iteration_1"
 
 
 def plot_results(responses, iteration):
+
     modalities = list(responses.keys())
     exact_matching = [responses[m] for m in modalities]
 
     # Plot
     plt.figure(figsize=(12, 5))
-    plt.bar(modalities, exact_matching)
+    plt.bar(modalities, exact_matching, color='skyblue')
 
     plt.xlabel("Modality")
     plt.ylabel("Exact matching (%)")
-    plt.title("Accuracy per Modality")
+    plt.title("Exact matching per modality")
 
-    plt.yticks(np.arange(0, 1, 5))
+    # Set proper y-ticks (0 to 1 with step 0.1)
+    plt.yticks(np.arange(0, 1.1, 0.1))  # include 1.0
 
+    # Rotate x-axis labels for readability
+    plt.xticks(rotation=45)
+
+    plt.tight_layout()
     plt.savefig(f'../figures/results_{iteration}.png')
     plt.show()
 
@@ -219,6 +225,7 @@ if __name__ == "__main__":
     print(f"Multimodal average: {multimodal_avg:.2f}")
     print(f"Total average: {np.mean([unimodal_avg, multimodal_avg])}")
 
+    print(responses)
     plot_results(responses, iteration)
 
     pk.dump(wrong, open(f"wrong_{iteration}.pk", "wb"))
