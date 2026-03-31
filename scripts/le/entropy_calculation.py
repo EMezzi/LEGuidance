@@ -9,71 +9,84 @@ from prompts.le.prompt_bridge_el_extraction import *
 from prompts.le.prompt_bridge_modality import *
 from prompts.le.prompt_check_answer import *
 
+from functions_entropy_calculation import *
+
 iteration = 'iteration_1'
+
+os.chdir(os.path.dirname(__file__))
 
 
 class LEAgent:
-    def __init__(self, client, path_criterias, modalities):
-        self.client = client
+    def __init__(self, openai_client, bedrock_client, path_criterias, modalities):
+        self.openai_client = openai_client
+        self.bedrock_client = bedrock_client
         self.path_criterias = path_criterias
         self.modalities = modalities
 
-    def decide_modality_llm(self, question, images, texts, table, table_dir, final_dataset_images):
-        """This method decides the modality by showing the data to the LLM"""
+    @staticmethod
+    def data_preparation(texts, images, final_dataset_images, table, table_dir):
+        paragraphs_text = "\n\n".join([
+            f"{i + 1}. Title: {p['title']}\nContent: {p['text']}"
+            for i, p in enumerate(texts)
+        ])
 
         images_text = "\n\n".join([
             f"{i + 1}. Title: {img['title']}"
             for i, img in enumerate(images)
         ])
 
+        # images_text = [f"{i + 1}. Title: {img['title']}" for i, img in enumerate(images)]
+
         image_inputs = []
         for img in images:
             image64 = encode_image(os.path.join(final_dataset_images, img["path"]))
             image_inputs.append({
                 "title": img["title"],
-                "image_url": f"data:image/jpeg;base64,{image64}"
+                "image_url": f"{image64}",
+                "image_ext": detect_media_type_from_bytes(
+                    open(os.path.join(final_dataset_images, img["path"]), "rb").read())
             })
-
-        paragraphs_text = "\n\n".join([
-            f"{i + 1}. Title: {p['title']}\nContent: {p['text']}"
-            for i, p in enumerate(texts)
-        ])
 
         json_table = json.load(open(os.path.join(table_dir, table["json"]), "rb"))
 
-        tables_text = f"""
-            Table Title: {json_table["title"]}
-            Table name: {json_table["table"]["table_name"]}
-            Content: {json_table["table"]}
-            """
+        tables_text = f"""Table Title: {json_table["title"]}
+        Table name: {json_table["table"]["table_name"]}
+        Content: {json_table["table"]}
+        """
 
-        response = self.client.responses.parse(
-            model="gpt-5.2",
-            input=[
-                {
-                    "role": "system",
-                    "content": system_prompt_modality
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": user_prompt_modality.format(question=question, images_text=images_text,
-                                                                paragraphs_text=paragraphs_text,
-                                                                tables_text=tables_text)
-                        },
-                        *[
-                            {"type": "input_image", "image_url": img["image_url"]}
-                            for img in image_inputs
-                        ]
-                    ]
-                }
-            ],
-            text_format=ModalityDecision,
-        )
+        return paragraphs_text, images_text, image_inputs, tables_text
 
-        return response.output_parsed.modalities
+    @staticmethod
+    def decide_modality_llm(model, openai_client, bedrock_client, question, images, texts, table, table_dir,
+                            final_dataset_images):
+        """This method decides the modality by showing the data to the LLM"""
+
+        paragraphs_text, images_text, images_inputs, tables_text = (
+            LEAgent.data_preparation(texts, images, final_dataset_images, table, table_dir))
+
+        if model == "global.amazon.nova-2-lite-v1:0":
+            return decide_modality_llm_nova2(model, bedrock_client, system_prompt_modality, user_prompt_modality,
+                                             question, images_text, images_inputs, paragraphs_text, tables_text)
+
+        elif model == "gpt-5.2" or model == "mistral.mistral-large-3-675b-instruct":
+            return decide_modality_llm_gpt(openai_client, system_prompt_modality, user_prompt_modality, question,
+                                           images_text, images_inputs, paragraphs_text, tables_text)
+
+        elif model == "moonshotai.kimi-k2.5":
+            return decide_modality_llm_moonshot(model, bedrock_client, system_prompt_modality, user_prompt_modality,
+                                                question, images_text, images_inputs, paragraphs_text, tables_text)
+
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return decide_modality_llm_moonshot(model, bedrock_client, system_prompt_modality, user_prompt_modality,
+                                                question, images_text, images_inputs, paragraphs_text, tables_text)
+
+        elif model == "qwen.qwen3-vl-235b-a22b":
+            return decide_modality_llm_qwen(model, bedrock_client, system_prompt_modality, user_prompt_modality,
+                                            question, images_text, images_inputs, paragraphs_text, tables_text)
+
+        elif model == "us.anthropic.claude-sonnet-4-6":
+            return decide_modality_llm_claude(model, bedrock_client, system_prompt_modality, user_prompt_modality,
+                                              question, images_text, images_inputs, paragraphs_text, tables_text)
 
     def decide_modality_reduced_data(self, question, remaining_modalities, images, texts, table, table_dir,
                                      final_dataset_images):
@@ -121,7 +134,7 @@ class LEAgent:
 
         available_content = "\n\n".join(content_sections)
 
-        response = self.client.responses.parse(
+        response = self.openai_client.responses.parse(
             model="gpt-5.2",
             input=[
                 {
@@ -151,65 +164,32 @@ class LEAgent:
 
         return response.output_parsed.modalities
 
-    def yesnoquestion(self, model, question_text):
-        if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_bool_question
-                    },
-                    {
-                        "role": "user",
-                        "content": f"""QUESTION: {question_text}"""
-                    }
-                ],
-                text_format=YesNoQuestion,
-            )
+    def yesnoquestion(self, model, openai_client, bedrock_client, question_text):
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "nvidia.nemotron-nano-12b-v2" or
+                model == "qwen.qwen3-vl-235b-a22b" or model == "us.anthropic.claude-sonnet-4-6"):
+            return yesnoquestion_amazon(model, bedrock_client, system_prompt_bool_question, question_text)
 
-            found = response.output_parsed
-            return found.is_yes_no, found.confidence
+        elif model == "gpt-5.2" or model:
+            return yesnoquestion_gpt(openai_client, system_prompt_bool_question, question_text)
 
-    def iscomparison(self, model, question_text):
-        if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_comparison_question
-                    },
-                    {
-                        "role": "user",
-                        "content": f"""QUESTION: {question_text}"""
-                    }
-                ],
-                text_format=IsComparison,
-            )
+    def iscomparison(self, model, openai_client, bedrock_client, question_text):
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "nvidia.nemotron-nano-12b-v2" or
+                model == "qwen.qwen3-vl-235b-a22b" or model == "us.anthropic.claude-sonnet-4-6"):
+            return iscomparison_amazon(model, bedrock_client, system_prompt_comparison_question, question_text)
 
-            found = response.output_parsed
-            return found.is_comparison, found.num_elements, found.confidence
+        elif model == "gpt-5.2":
+            return iscomparison_gpt(openai_client, system_prompt_comparison_question, question_text)
 
     def isgraphical(self, model, question_text):
-        if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_isgraphical_question
-                    },
-                    {
-                        "role": "user",
-                        "content": f"""QUESTION: {question_text}"""
-                    }
-                ],
-                text_format=IsGraphical,
-            )
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "nvidia.nemotron-nano-12b-v2" or
+                model == "qwen.qwen3-vl-235b-a22b" or model == "us.anthropic.claude-sonnet-4-6"):
+            return isgraphical_amazon(model, self.bedrock_client, system_prompt_isgraphical_question, question_text)
 
-            found = response.output_parsed
-            return found.is_graphical, found.confidence
+        if model == "gpt-5.2":
+            return isgraphical_gpt(model, self.openai_client, system_prompt_isgraphical_question, question_text)
 
     def read_criterias(self, question, unimodal):
         criteria_object = json.load(open(os.path.join(self.path_criterias, question), "rb"))
@@ -292,26 +272,6 @@ class LEAgent:
             found = response.output_parsed
             return found.answer
 
-    def analyse_table_row_restricting_criteria(self, model, criteria, row):
-        if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_row
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt_row.format(row=row, criteria=criteria)
-                    }
-                ],
-                text_format=AnswerContainsCriteria,
-            )
-
-            found = response.output_parsed
-            return found.answer
-
     def table_general_understanding(self, model, table_title, table_name, columns):
 
         if model == "gpt-5.2":
@@ -359,11 +319,32 @@ class LEAgent:
             found = json.loads(response.content[0].text)
             return found["description"]
 
-    def create_unimodal_partitions(self, model, question, question_files, table_dir, modality, criterias):
+    def analyse_table_row_restricting_criteria(self, model, criteria, row):
+        if model == "gpt-5.2":
+            response = self.client.responses.parse(
+                model="gpt-5.2",
+                input=[
+                    {
+                        "role": "system",
+                        "content": system_prompt_row
+                    },
+                    {
+                        "role": "user",
+                        "content": user_prompt_row.format(row=row, criteria=criteria)
+                    }
+                ],
+                text_format=AnswerContainsCriteria,
+            )
+
+            found = response.output_parsed
+            return found.answer
+
+    def create_unimodal_partitions(self, model, question, question_files, table_dir, modality, criterias, dataset,
+                                   approach, setting):
         """This method checks whether images, text, and table rows, can be split based on the distinction criterias."""
 
         unimodal_partition_path = os.path.join(
-            f"../results/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
+            f"../../results/{dataset}/{approach}/{setting}/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
 
         if os.path.exists(unimodal_partition_path):
             partitions = json.load(open(unimodal_partition_path, "rb"))
@@ -385,8 +366,9 @@ class LEAgent:
                 self.fill_criteria_table(model, criterias, question_files, table_dir, partitions)
 
             # Check the partition with the lowest logical entropy (le > 0 and le < 1)
-            with open(f"../results/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}",
-                      "w") as json_file:
+            with open(
+                    f"../../results/{dataset}/{approach}/{setting}/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}",
+                    "w") as json_file:
                 json.dump(partitions, json_file, indent=4)
 
     @staticmethod
@@ -820,14 +802,15 @@ class LEAgent:
                 return found.contains, found.entity, found.confidence
 
     @staticmethod
-    def extract_partitions(model, question, mod_chosen, question_text, partitions_path):
+    def extract_partitions(model, question, mod_chosen, question_text, partitions_path, dataset, approach, setting):
         """In this question we check whether it is possible to return an answer with only one modality"""
         # We state that if the predicted modality was one and if there is a partition with minimum logical entropy
         # then we can try to verify whether we can give an answer
 
         partitions = json.load(
-            open(os.path.join(f"../results/partitions/{partitions_path}/{iteration}/{model}", f"partitions_{question}"),
-                 "rb"))
+            open(os.path.join(
+                f"../../results/{dataset}/{approach}/{setting}/partitions/{partitions_path}/{iteration}/{model}",
+                f"partitions_{question}"), "rb"))
 
         if mod_chosen:
             fillings = [
@@ -920,7 +903,8 @@ class LEAgent:
 
         if not any(d.get("filling") for d in min_le_filling):
             print("Fillings are empty")
-            yesnoquestion, confidence = self.yesnoquestion(model, question_text)
+            yesnoquestion, confidence = self.yesnoquestion(model, self.openai_client, self.bedrock_client,
+                                                           question_text)
             print(yesnoquestion)
             if yesnoquestion:
                 final_answer = "no"
@@ -995,7 +979,8 @@ class LEAgent:
 
             print(f"Conditional criteria for answer: {conditional_criteria}")
 
-            yesnoquestion, confidence = self.yesnoquestion(model, question_text)
+            yesnoquestion, confidence = self.yesnoquestion(model, self.openai_client, self.bedrock_client,
+                                                           question_text)
             print(yesnoquestion)
             if yesnoquestion:
                 final_answer = "yes"
@@ -1047,15 +1032,15 @@ class LEAgent:
         else:
             return final_answer
 
-    def create_multi_hop_partitions(self, model, question, question_text):
+    def create_multi_hop_partitions(self, model, question, question_text, dataset, approach, setting):
         """With this method we generate multi hop partitions within the same modality. In this case we check what are
         the criterias, within the same modality, that allows to diminish the logical entropy"""
         unimodal_partitions_path = os.path.join(
-            f"../results/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
+            f"../../results/{dataset}/{approach}/{setting}/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
         unimodal_partitions = json.load(open(unimodal_partitions_path, "rb"))
 
         multihop_partitions_path = os.path.join(
-            f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}")
+            f"../../results/{dataset}/{approach}/{setting}/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}")
         if os.path.exists(multihop_partitions_path):
             multihop_partitions = json.load(open(multihop_partitions_path, "rb"))
         else:
@@ -1199,7 +1184,8 @@ class LEAgent:
         json.dump(multihop_partitions, open(multihop_partitions_path, "w"), indent=4)
         return multihop_partitions
 
-    def return_restricting_criteria(self, model, question, question_text, unimodal_partitions, conditional_modality):
+    def return_restricting_criteria(self, model, question, question_text, unimodal_partitions, conditional_modality,
+                                    dataset, approach, setting):
 
         # Here we take all the partitions with logical entropy greater than 0
         valid_partitions_conditional_modality = [p for p in unimodal_partitions[conditional_modality] if p["le"] > 0 or
@@ -1231,12 +1217,13 @@ class LEAgent:
             old_criterias.extend(element_mapping[el_id]['criterias'])
 
         if os.path.exists(
-                f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/restricting_criterias_extraction/{question}"):
+                f"../../results/{dataset}/{approach}/{setting}/restricting_criterias_extraction/{model}/{question}"):
 
             print("The restricting file already exist")
-            restricting_criterias_json = json.load(open(
-                f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/restricting_criterias_extraction/{question}",
-                "rb"))
+            restricting_criterias_json = (
+                json.load(open(
+                    f"../../results/{dataset}/{approach}/{setting}/restricting_criterias_extraction/{model}/{question}",
+                    "rb")))
 
             if conditional_modality in restricting_criterias_json:
                 print("The conditional modality already exists in it")
@@ -1284,10 +1271,9 @@ class LEAgent:
                                                                                              'el_filling']))
 
         if os.path.exists(
-                f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/restricting_criterias_extraction/{question}"):
+                f"../../results/{dataset}/{approach}/{setting}/restricting_criterias_extraction/{question}"):
             restricting_criterias_json = json.load(open(
-                f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/restricting_criterias_extraction/{question}",
-                "rb"))
+                f"../../results/{dataset}/{approach}/{setting}/restricting_criterias_extraction/{question}", "rb"))
 
             print("The file already exists but the conditional modality is new")
             restricting_criterias_json[conditional_modality] = restricting_criterias
@@ -1297,7 +1283,7 @@ class LEAgent:
             restricting_criterias_json = {conditional_modality: restricting_criterias}
 
         json.dump(restricting_criterias_json, open(
-            f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/restricting_criterias_extraction/{question}",
+            f"../../results/{dataset}/{approach}/{setting}/restricting_criterias_extraction/{question}",
             "w"), indent=4)
 
         return restricting_criterias, old_criterias
@@ -1360,13 +1346,13 @@ class LEAgent:
 
         multimodal_partitions[conditioned_modality].append(new_partition)
 
-    def create_multimodal_partitions(self, model, question, question_text):
+    def create_multimodal_partitions(self, model, question, question_text, dataset, approach, setting):
         unimodal_partitions_path = os.path.join(
-            f"../results/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
+            f"../../results/{dataset}/{approach}/{setting}/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
         unimodal_partitions = json.load(open(unimodal_partitions_path, "rb"))
 
         multimodal_partitions_path = os.path.join(
-            f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}")
+            f"../../results/{dataset}/{approach}/{setting}/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}")
         if os.path.exists(multimodal_partitions_path):
             multimodal_partitions = json.load(open(multimodal_partitions_path, "rb"))
         else:
@@ -1401,7 +1387,8 @@ class LEAgent:
                                                                                         question,
                                                                                         question_text,
                                                                                         unimodal_partitions,
-                                                                                        conditional_modality)
+                                                                                        conditional_modality,
+                                                                                        dataset, approach, setting)
 
                 restricting_criterias = [el for el in restricting_criterias if el is not None and el.lower() != 'none']
                 print(f"The restricting criterias are: {restricting_criterias}")
@@ -1532,7 +1519,8 @@ class LEAgent:
 
         print(f"Average le unimodal and multimodal: {average_modality_le_unimodal}, {average_modality_le_multimodal}")
 
-        LEAgent.calculate_entropy_evolution(average_modality_le_unimodal, average_modality_le_multimodal,
+        LEAgent.calculate_entropy_evolution(average_modality_le_unimodal,
+                                            average_modality_le_multimodal,
                                             modality_answers_given)
 
         print(average_modality_le_multimodal)
@@ -1746,14 +1734,17 @@ class LEAgent:
 
     @staticmethod
     def find_final_answer_boolean_table(model, question, question_text, partitions_path,
-                                        election_modality, answers_dir):
+                                        election_modality, answers_dir, dataset, approach, setting):
 
         print(f"Final answer to be found in table (boolean question): {question_text}")
         modality, partitions, min_le_filling, final_answer = LEAgent.extract_partitions(model,
                                                                                         question,
                                                                                         "table",
                                                                                         question_text,
-                                                                                        partitions_path)
+                                                                                        partitions_path,
+                                                                                        dataset,
+                                                                                        approach,
+                                                                                        setting)
 
         final_answer = None
         for partition in partitions[election_modality]:
@@ -1769,12 +1760,16 @@ class LEAgent:
         return final_answer
 
     def find_final_answer_boolean_two_steps_table(self, model, question, question_text, partitions_path,
-                                                  election_modality, answers_dir, answer_class_specific, num_elements):
+                                                  election_modality, answers_dir, answer_class_specific, num_elements,
+                                                  dataset, approach, setting):
 
         modality, partitions, min_le_filling, final_answer = LEAgent.extract_partitions(model, question,
                                                                                         "table",
                                                                                         question_text,
-                                                                                        partitions_path)
+                                                                                        partitions_path,
+                                                                                        dataset,
+                                                                                        approach,
+                                                                                        setting)
 
         print("Let's see what are we talking about")
 
@@ -1816,12 +1811,13 @@ class LEAgent:
             return final_answer
 
     def find_final_answer_comparison_three_modalities(self, model, question, question_text, answers_dir,
-                                                      answer_class_specific):
+                                                      answer_class_specific, dataset, approach, setting):
 
         unimodal_partitions_path = os.path.join(
-            f"../results/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
+            f"../../results/{dataset}/{approach}/{setting}/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
         unimodal_partitions = json.load(open(unimodal_partitions_path, "rb"))
-        multimodal_partitions = self.create_multimodal_partitions(model, question, question_text)
+        multimodal_partitions = self.create_multimodal_partitions(model, question, question_text, dataset, approach,
+                                                                  setting)
 
         table_description = unimodal_partitions["table"][0]["table_understanding"]
 
@@ -1875,20 +1871,22 @@ class LEAgent:
 
     def return_final_answer(self, model, question, question_files, question_text, rewritten_question_text,
                             priority_modalities, criterias, remaining_modalities, answer_class_specific,
-                            answer_class_general, table_dir, final_dataset_images, answers_dir):
+                            answer_class_general, table_dir, final_dataset_images, answers_dir, dataset, approach,
+                            setting):
 
         final_answer = None
 
         unimodal_partitions_path = os.path.join(
-            f"../results/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
+            f"../../results/{dataset}/{approach}/{setting}/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}")
         multimodal_partitions_path = os.path.join(
-            f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}")
+            f"../../results/{dataset}/{approach}/{setting}/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}")
 
         # First we create the partitions, both in the unimodal case and also in the multi-hop unimodal case
         for modality in priority_modalities:
             print(f"CREATING UNIMODAL PARTITIONS for {modality.upper()}")
             print("************************************************************************")
-            self.create_unimodal_partitions(model, question, question_files, table_dir, modality, criterias)
+            self.create_unimodal_partitions(model, question, question_files, table_dir, modality, criterias, dataset,
+                                            approach, setting)
             print("************************************************************************")
             print(f"END CREATION")
             print("************************************************************************\n")
@@ -1900,7 +1898,7 @@ class LEAgent:
                 print("WE do not even create the multi-hop. We just go with a single table")
                 LEAgent.find_final_answer_boolean_table(model, question, rewritten_question_text,
                                                         "unimodal_partitions", priority_modalities[0],
-                                                        answers_dir)
+                                                        answers_dir, dataset, approach, setting)
 
                 return
 
@@ -1911,7 +1909,8 @@ class LEAgent:
                     print("comparison mood")
                     self.find_final_answer_boolean_two_steps_table(model, question, question_text,
                                                                    "unimodal_partitions", priority_modalities[0],
-                                                                   answers_dir, answer_class_specific, num_elements)
+                                                                   answers_dir, answer_class_specific, num_elements,
+                                                                   dataset, approach, setting)
 
                     return
 
@@ -1928,9 +1927,11 @@ class LEAgent:
                 # it, and we can proceed.
                 print(f"Do we need a graphical? {is_graphical}")
                 if is_graphical and 'image' not in priority_modalities:
-                    self.create_unimodal_partitions(model, question, question_files, table_dir, "image", criterias)
+                    self.create_unimodal_partitions(model, question, question_files, table_dir, "image", criterias,
+                                                    dataset, approach, setting)
                     self.find_final_answer_comparison_three_modalities(model, question, rewritten_question_text,
-                                                                       answers_dir, answer_class_specific)
+                                                                       answers_dir, answer_class_specific, dataset,
+                                                                       approach, setting)
 
         multimodal = len(priority_modalities) > 1
 
@@ -1948,22 +1949,28 @@ class LEAgent:
             print("***************************************************************")
             # Here we create the multimodal partitions
             multimodal_partitions_path = os.path.join(
-                f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}")
+                f"../../results/{dataset}/{approach}/{setting}/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}")
 
             # if not os.path.exists(multimodal_partitions_path):
             print("************************************************************************")
             print(f"CREATING MULTIMODAL PARTITIONS")
-            multimodal_partitions = self.create_multimodal_partitions(model, question, rewritten_question_text)
+            multimodal_partitions = self.create_multimodal_partitions(model, question, rewritten_question_text, dataset,
+                                                                      approach, setting)
 
             json.dump(multimodal_partitions,
-                      open(f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}",
-                           "w"), indent=4)
+                      open(
+                          f"../../results/{dataset}/{approach}/{setting}/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}",
+                          "w"), indent=4)
             print("************************************************************************\n")
 
         print(f"Final answer: {final_answer}")
         print(modality_answers_given["unimodal_answers"].values())
         print(modality_answers_given["multimodal_answers"].values())
 
+        # This is the variable that will allow to know what happens at each step
+        steps = {}
+
+        i = 0
         while (final_answer is None and (any(modality_answers_given["unimodal_answers"].values()) or
                                          any(modality_answers_given["multimodal_answers"].values()))):
 
@@ -1983,7 +1990,10 @@ class LEAgent:
                                                                                             question,
                                                                                             mod_chosen,
                                                                                             rewritten_question_text,
-                                                                                            partitions_path)
+                                                                                            partitions_path,
+                                                                                            dataset,
+                                                                                            approach,
+                                                                                            setting)
 
             print(f"The mod chosen is: {modality}")
 
@@ -1993,8 +2003,7 @@ class LEAgent:
                 modality_answers_given["multimodal_answers"][modality] = False
 
             json.dump(modality_answers_given,
-                      open(f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/entropy_evolution/{question}",
-                           "w"),
+                      open(f"../../results/{dataset}/{approach}/{setting}/entropy_evolution/{model}/{question}", "w"),
                       indent=4)
 
             print(f"Modality answers given are now this: {modality_answers_given}")
@@ -2014,6 +2023,15 @@ class LEAgent:
                                                       is_comparison,
                                                       num_elements)
 
+                steps[i] = {"unimodal_multimodal": partitions_path, "modality_chosen": mod_chosen,
+                            "answer": final_answer}
+
+                json.dump(steps,
+                          open(f"../../results/{dataset}/{approach}/{setting}/steps/{model}/{question}", "w"),
+                          indent=4)
+
+                i += 1
+
             if final_answer is None:
                 print("We need to find another modality!")
                 if remaining_modalities:
@@ -2028,11 +2046,14 @@ class LEAgent:
                     else:
                         decided_modality = remaining_modalities[0]
 
-                    modalities_json = json.load(open(f"../results/modalities_predicted/{model}/{question}", "rb"))
+                    modalities_json = json.load(
+                        open(f"../../results/{dataset}/{approach}/{setting}/modalities_predicted/{model}/{question}",
+                             "rb"))
                     max_step = max([int(step.split('_')[1]) for step in modalities_json.keys()])
                     modalities_json[f'step_{max_step + 1}'] = decided_modality
 
-                    json.dump(modalities_json, open(f"../results/modalities_predicted/{model}/{question}", "w"),
+                    json.dump(modalities_json, open(
+                        f"../../results/{dataset}/{approach}/{setting}/modalities_predicted/{model}/{question}", "w"),
                               indent=4)
 
                     remaining_modalities.remove(decided_modality)
@@ -2040,21 +2061,25 @@ class LEAgent:
                     print(f"CREATING UNIMODAL PARTITIONS for {decided_modality.upper()}")
                     print("************************************************************************\n")
                     self.create_unimodal_partitions(model, question, question_files, table_dir, decided_modality,
-                                                    criterias)
+                                                    criterias, dataset, approach, setting)
 
                     print("And now we create multimodal partitions.")
-                    multimodal_partitions = self.create_multimodal_partitions(model, question, question_text)
+                    multimodal_partitions = self.create_multimodal_partitions(model, question, question_text, dataset,
+                                                                              approach, setting)
 
                     json.dump(multimodal_partitions, open(
-                        f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}", "w"),
+                        f"../../results/{dataset}/{approach}/{setting}/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}",
+                        "w"),
                               indent=4)
 
                     unimodal_partitions = json.load(
-                        open(f"../results/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}",
-                             "rb"))
+                        open(
+                            f"../../results/{dataset}/{approach}/{setting}/partitions/unimodal_partitions/{iteration}/{model}/partitions_{question}",
+                            "rb"))
                     multimodal_partitions = json.load(
-                        open(f"../results/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}",
-                             "rb"))
+                        open(
+                            f"../../results/{dataset}/{approach}/{setting}/partitions/multimodal_partitions/{iteration}/{model}/partitions_{question}",
+                            "rb"))
 
                     average_modality_le_unimodal = average_modality_le(unimodal_partitions)
                     average_modality_le_multimodal = average_modality_le(multimodal_partitions)
@@ -2064,47 +2089,68 @@ class LEAgent:
                                                         modality_answers_given)
 
                     if not remaining_modalities and is_comparison:
+                        i += 1
                         final_answer = self.find_final_answer_comparison_three_modalities(model, question,
                                                                                           rewritten_question_text,
                                                                                           answers_dir,
-                                                                                          answer_class_specific)
+                                                                                          answer_class_specific,
+                                                                                          dataset,
+                                                                                          approach,
+                                                                                          setting)
 
                         modality_answers_given["multimodal_answers"]["table"] = False
 
+                        steps[i] = {"unimodal_multimodal": "multimodal_partitions",
+                                    "modality_chosen": "table",
+                                    "answer": final_answer}
+
+                        json.dump(steps,
+                                  open(f"../../results/{dataset}/{approach}/{setting}/steps/{model}/{question}", "w"),
+                                  indent=4)
+
                         json.dump(modality_answers_given,
                                   open(
-                                      f"/Users/emanuelemezzi/PycharmProjects/LEGuidance/results/entropy_evolution/{question}",
+                                      f"../../results/{dataset}/{approach}/{setting}/entropy_evolution/{model}/{question}",
                                       "w"),
                                   indent=4)
 
     def answer_question(self, model, question, question_data, question_files, table_dir, final_dataset_images,
-                        answers_dir):
+                        answers_dir, dataset, approach, setting):
         """Method which calls the other methods to calculate the final answer."""
 
         # START MODALITY SELECTION
         all_modalities = ["image", "table", "text"]
 
         # Predict the modalities that must be used and create the file that contains them (if it does not exist)
-        modalities_json = os.path.join(f"../results/modalities_predicted/{model}/{question}")
+        modalities_json = os.path.join(
+            f"../../results/{dataset}/{approach}/{setting}/modalities_predicted/{model}/{question}")
+
+        print(f"Modalities json: {modalities_json}")
 
         if os.path.exists(modalities_json):
             print("************************************")
             print("Modality file already exists? YES")
             print("************************************\n")
-            priority_modalities = json.load(open(f"../results/modalities_predicted/{model}/{question}", "rb"))
+            priority_modalities = json.load(
+                open(f"../../results/{dataset}/{approach}/{setting}/modalities_predicted/{model}/{question}", "rb"))
             priority_modalities = priority_modalities["step_1"]
         else:
             print("*************************************************")
             print("Modality file already exists? NO. We create it")
             print("*************************************************\n")
-            priority_modalities = self.decide_modality_llm(question_data["question_text"],
-                                                           question_files["image_set"],
-                                                           question_files["text_set"],
-                                                           question_files["table_set"][0],
-                                                           table_dir, final_dataset_images).split('_')
+            priority_modalities = LEAgent.decide_modality_llm(model,
+                                                              self.openai_client,
+                                                              self.bedrock_client,
+                                                              question_data["question_text"],
+                                                              question_files["image_set"],
+                                                              question_files["text_set"],
+                                                              question_files["table_set"][0],
+                                                              table_dir, final_dataset_images).split('_')
 
             json.dump({"step_1": priority_modalities},
-                      open(os.path.join(f"../results/modalities_predicted/{model}/{question}"), "w"), indent=4)
+                      open(os.path.join(
+                          f"../../results/{dataset}/{approach}/{setting}/modalities_predicted/{model}/{question}"),
+                          "w"), indent=4)
 
         remaining_modalities = [m for m in all_modalities if m not in priority_modalities]
 
@@ -2128,18 +2174,21 @@ class LEAgent:
         self.return_final_answer(model, question, question_files, question_data["question_text"],
                                  rewritten_question_text,
                                  priority_modalities, criterias, remaining_modalities, answer_class_specific,
-                                 answer_class_general, table_dir, final_dataset_images, answers_dir)
+                                 answer_class_general, table_dir, final_dataset_images, answers_dir, dataset, approach,
+                                 setting)
         # END ANSWER TO QUESTION
 
 
 def answer_qa(model, agent, questions_list, questions_dir, association_dir, table_dir, final_dataset_images,
-              answers_dir):
+              answers_dir, dataset, approach, setting):
     os.makedirs(answers_dir, exist_ok=True)
-    os.makedirs(f"../results/partitions/unimodal_partitions/{iteration}/{model}/", exist_ok=True)
+    os.makedirs(f"../../results/{dataset}/{approach}/{setting}/partitions/unimodal_partitions/{iteration}/{model}/",
+                exist_ok=True)
 
-    for i, q in enumerate(questions_list):
-        question = q["index"]
-        modalities = q["modality"]
+    for i, question in enumerate(questions_list):
+        json_question = json.load(open(os.path.join(questions_dir, question), "rb"))
+        modalities = json_question["metadata"]["modalities"]
+
         if len(modalities) == 1:
             unimodal_multimodal = "/unimodal/"
         else:
@@ -2150,19 +2199,24 @@ def answer_qa(model, agent, questions_list, questions_dir, association_dir, tabl
         print("*************************************************************************************")
         print(f"Question number: {i}")
         print(f"Question json: {question}")
-        print(f"Question text: {q['original_question']}")
+        print(f"Question text: {json_question['question']}")
         print(f"Target modalities: {modalities}")
         print("*************************************************************************************\n")
         question_data = get_question_data(questions_dir, question)
         question_files = get_question_files(association_dir, question)
 
         agent.answer_question(model, question, question_data, question_files, table_dir, final_dataset_images,
-                              answers_dir + unimodal_multimodal)
+                              answers_dir + unimodal_multimodal, dataset, approach, setting)
 
 
 def entropy_calculation_main(model, agent, questions_list, questions_dir, association_dir, table_dir,
-                             final_dataset_images, answers_dir):
+                             final_dataset_images, answers_dir, dataset, approach, setting):
     # create_association_qa(agent, questions_dir, association_dir, image_dir, text_dir, table_dir)
 
     answer_qa(model, agent, questions_list, questions_dir, association_dir, table_dir, final_dataset_images,
-              answers_dir)
+              answers_dir, dataset, approach, setting)
+
+
+if __name__ == '__main__':
+    if os.path.exists(f"../../results/multimodalqa/le/training/modalities_predicted/gpt-5.2/question_9312.json"):
+        print("Cazzo")
