@@ -1,3 +1,5 @@
+"""*****TEXT****"""
+
 system_prompt_text_bridge = """You are a reasoning assistant.
 
 You are given: 
@@ -32,6 +34,7 @@ Determine whether any entity, concept, or fact mentioned in PARAGRAPH 1 is also 
 Answer "yes" or "no".
 """
 
+"""*****IMAGE****"""
 
 system_prompt_image_bridge = """You are a reasoning assistant.
 
@@ -62,6 +65,8 @@ Determine whether any entity, concept, or fact mentioned in PARAGRAPH is also pr
 
 Answer "yes" or "no".
 """
+
+"""*****TABLE - ROW****"""
 
 system_prompt_row_bridge = """You are a reasoning assistant.
 

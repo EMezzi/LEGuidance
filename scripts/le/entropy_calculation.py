@@ -1,4 +1,3 @@
-from schemas.json_schemas import json_schema_check_criteria, json_schema_table_description
 from schemas.pydantic_schemas import *
 from utils.utilities import *
 
@@ -56,39 +55,29 @@ class LEAgent:
 
         return paragraphs_text, images_text, image_inputs, tables_text
 
-    @staticmethod
-    def decide_modality_llm(model, openai_client, bedrock_client, question, images, texts, table, table_dir,
-                            final_dataset_images):
+    def decide_modality_llm(self, model, question_text, images, texts, table, table_dir, final_dataset_images):
         """This method decides the modality by showing the data to the LLM"""
 
         paragraphs_text, images_text, images_inputs, tables_text = (
             LEAgent.data_preparation(texts, images, final_dataset_images, table, table_dir))
 
-        if model == "global.amazon.nova-2-lite-v1:0":
-            return decide_modality_llm_nova2(model, bedrock_client, system_prompt_modality, user_prompt_modality,
-                                             question, images_text, images_inputs, paragraphs_text, tables_text)
-
-        elif model == "gpt-5.2" or model == "mistral.mistral-large-3-675b-instruct":
-            return decide_modality_llm_gpt(openai_client, system_prompt_modality, user_prompt_modality, question,
-                                           images_text, images_inputs, paragraphs_text, tables_text)
-
-        elif model == "moonshotai.kimi-k2.5":
-            return decide_modality_llm_moonshot(model, bedrock_client, system_prompt_modality, user_prompt_modality,
-                                                question, images_text, images_inputs, paragraphs_text, tables_text)
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "moonshotai.kimi-k2.5" or
+                model == "nvidia.nemotron-nano-12b-v2" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return decide_modality_llm_amazon(model, self.bedrock_client, system_prompt_modality, user_prompt_modality,
+                                              question_text, images_text, images_inputs, paragraphs_text, tables_text,
+                                              use_tool=True)
 
         elif model == "nvidia.nemotron-nano-12b-v2":
-            return decide_modality_llm_moonshot(model, bedrock_client, system_prompt_modality, user_prompt_modality,
-                                                question, images_text, images_inputs, paragraphs_text, tables_text)
+            return decide_modality_llm_amazon(model, self.bedrock_client, system_prompt_modality, user_prompt_modality,
+                                              question_text, images_text, images_inputs, paragraphs_text, tables_text,
+                                              use_tool=False)
 
-        elif model == "qwen.qwen3-vl-235b-a22b":
-            return decide_modality_llm_qwen(model, bedrock_client, system_prompt_modality, user_prompt_modality,
-                                            question, images_text, images_inputs, paragraphs_text, tables_text)
+        elif model == "gpt-5.2" or model == "mistral.mistral-large-3-675b-instruct":
+            return decide_modality_llm_gpt(model, self.openai_client, system_prompt_modality, user_prompt_modality,
+                                           question_text, images_text, images_inputs, paragraphs_text, tables_text)
 
-        elif model == "us.anthropic.claude-sonnet-4-6":
-            return decide_modality_llm_claude(model, bedrock_client, system_prompt_modality, user_prompt_modality,
-                                              question, images_text, images_inputs, paragraphs_text, tables_text)
-
-    def decide_modality_reduced_data(self, question, remaining_modalities, images, texts, table, table_dir,
+    def decide_modality_reduced_data(self, model, question, remaining_modalities, images, texts, table, table_dir,
                                      final_dataset_images):
         """In this method we want to find the modality in case the ones chosen were not enough"""
         # print("Final dataset images: ", final_dataset_images)
@@ -96,30 +85,38 @@ class LEAgent:
 
         images_text, image_inputs, paragraphs_text, tables_text = None, None, None, None
         for modality in remaining_modalities:
-            if modality == "image":
+
+            if modality == "text":
+                paragraphs_text = "\n\n".join([
+                    f"{i + 1}. Title: {p['title']}\nContent: {p['text']}"
+                    for i, p in enumerate(texts)
+                ])
+
+            elif modality == "image":
                 images_text = "\n\n".join([
                     f"{i + 1}. Title: {img['title']}"
                     for i, img in enumerate(images)
                 ])
+
+                # images_text = [f"{i + 1}. Title: {img['title']}" for i, img in enumerate(images)]
 
                 image_inputs = []
                 for img in images:
                     image64 = encode_image(os.path.join(final_dataset_images, img["path"]))
                     image_inputs.append({
                         "title": img["title"],
-                        "image_url": f"data:image/jpeg;base64,{image64}"
+                        "image_url": f"{image64}",
+                        "image_ext": detect_media_type_from_bytes(
+                            open(os.path.join(final_dataset_images, img["path"]), "rb").read())
                     })
-
-            elif modality == "text":
-                paragraphs_text = "\n\n".join([
-                    f"{i + 1}. Title: {p['title']}\nContent: {p['text']}"
-                    for i, p in enumerate(texts)
-                ])
 
             elif modality == "table":
                 json_table = json.load(open(os.path.join(table_dir, table["json"]), "rb"))
 
-                tables_text = f"""Table Title: {json_table["title"]} \nTable name: {json_table["table"]["table_name"]} \nContent: {json_table["table"]}"""
+                tables_text = f"""Table Title: {json_table["title"]}
+                        Table name: {json_table["table"]["table_name"]}
+                        Content: {json_table["table"]}
+                        """
 
         content_sections = []
 
@@ -134,210 +131,145 @@ class LEAgent:
 
         available_content = "\n\n".join(content_sections)
 
-        response = self.openai_client.responses.parse(
-            model="gpt-5.2",
-            input=[
-                {
-                    "role": "system",
-                    "content": system_prompt_reduced_modality.format(remaining_modalities=remaining_modalities)
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": user_prompt_reduced_modality.format(question=question,
-                                                                        available_content=available_content)
-                        },
-                        *(
-                            [
-                                {"type": "input_image", "image_url": img["image_url"]}
-                                for img in image_inputs
-                            ]
-                            if image_inputs is not None else []
-                        )
-                    ]
-                }
-            ],
-            text_format=ModalityDecision,
-        )
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "moonshotai.kimi-k2.5" or
+                model == "nvidia.nemotron-nano-12b-v2" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return decide_modality_reduced_data_amazon(model, self.bedrock_client, system_prompt_reduced_modality,
+                                                       user_prompt_reduced_modality, question, available_content,
+                                                       remaining_modalities,
+                                                       image_inputs, use_tool=True)
 
-        return response.output_parsed.modalities
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return decide_modality_reduced_data_amazon(model, self.bedrock_client, system_prompt_reduced_modality,
+                                                       user_prompt_reduced_modality, question, available_content,
+                                                       remaining_modalities,
+                                                       image_inputs, use_tool=False)
 
-    def yesnoquestion(self, model, openai_client, bedrock_client, question_text):
+        elif model == "gpt-5.2" or model == "mistral.mistral-large-3-675b-instruct":
+            return decide_modality_reduced_data_gpt(model, self.openai_client, system_prompt_reduced_modality,
+                                                    user_prompt_reduced_modality, question, available_content,
+                                                    remaining_modalities, image_inputs)
+
+    def yesnoquestion(self, model, question_text):
         if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
-                model == "moonshotai.kimi-k2.5" or model == "nvidia.nemotron-nano-12b-v2" or
-                model == "qwen.qwen3-vl-235b-a22b" or model == "us.anthropic.claude-sonnet-4-6"):
-            return yesnoquestion_amazon(model, bedrock_client, system_prompt_bool_question, question_text)
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return yesnoquestion_amazon(model, self.bedrock_client, system_prompt_bool_question, question_text,
+                                        use_tool=True)
 
-        elif model == "gpt-5.2" or model:
-            return yesnoquestion_gpt(openai_client, system_prompt_bool_question, question_text)
-
-    def iscomparison(self, model, openai_client, bedrock_client, question_text):
-        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
-                model == "moonshotai.kimi-k2.5" or model == "nvidia.nemotron-nano-12b-v2" or
-                model == "qwen.qwen3-vl-235b-a22b" or model == "us.anthropic.claude-sonnet-4-6"):
-            return iscomparison_amazon(model, bedrock_client, system_prompt_comparison_question, question_text)
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return yesnoquestion_amazon(model, self.bedrock_client, system_prompt_bool_question, question_text,
+                                        use_tool=False)
 
         elif model == "gpt-5.2":
-            return iscomparison_gpt(openai_client, system_prompt_comparison_question, question_text)
+            return yesnoquestion_gpt(model, self.openai_client, system_prompt_bool_question, question_text)
+
+    def iscomparison(self, model, question_text):
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return iscomparison_amazon(model, self.bedrock_client, system_prompt_comparison_question, question_text,
+                                       use_tool=True)
+
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return iscomparison_amazon(model, self.bedrock_client, system_prompt_comparison_question, question_text,
+                                       use_tool=False)
+
+        elif model == "gpt-5.2":
+            return iscomparison_gpt(model, self.openai_client, system_prompt_comparison_question, question_text)
 
     def isgraphical(self, model, question_text):
         if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
-                model == "moonshotai.kimi-k2.5" or model == "nvidia.nemotron-nano-12b-v2" or
-                model == "qwen.qwen3-vl-235b-a22b" or model == "us.anthropic.claude-sonnet-4-6"):
-            return isgraphical_amazon(model, self.bedrock_client, system_prompt_isgraphical_question, question_text)
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return isgraphical_amazon(model, self.bedrock_client, system_prompt_isgraphical_question, question_text,
+                                      use_tool=True)
 
-        if model == "gpt-5.2":
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return isgraphical_amazon(model, self.bedrock_client, system_prompt_isgraphical_question, question_text,
+                                      use_tool=False)
+
+        elif model == "gpt-5.2":
             return isgraphical_gpt(model, self.openai_client, system_prompt_isgraphical_question, question_text)
 
-    def read_criterias(self, question, unimodal):
+    def read_criterias(self, question):
         criteria_object = json.load(open(os.path.join(self.path_criterias, question), "rb"))
 
-        if unimodal:
-            criterias = [criteria_object["expected_answer_type"]["expected_answer_type_specific"],
-                         criteria_object["expected_answer_type"]["expected_answer_type_general"],
-                         criteria_object["rewritten_question"]]
+        # Expected answer type will be used also as criteria for the splitting.
+        criterias = [criteria_object["expected_answer_type"]["expected_answer_type_specific"],
+                     criteria_object["expected_answer_type"]["expected_answer_type_general"],
+                     criteria_object["rewritten_question"],
+                     criteria_object["expected_answer_type"]["expected_answer_type_specific"],
+                     criteria_object["rewritten_question"],
+                     criteria_object["target"]["text"],
+                     criteria_object["asked_property"]]
 
-            for constraint in criteria_object["constraints"]:
-                criterias.append(constraint['evidence'])
+        for constraint in criteria_object["constraints"]:
+            criterias.append(constraint['evidence'])
 
-            return criterias
+        return criterias
 
-        else:
-            # Expected answer type will be used also as criteria for the splitting.
-            criterias = [criteria_object["expected_answer_type"]["expected_answer_type_specific"],
-                         criteria_object["expected_answer_type"]["expected_answer_type_general"],
-                         criteria_object["rewritten_question"],
-                         criteria_object["expected_answer_type"]["expected_answer_type_specific"],
-                         criteria_object["rewritten_question"],
-                         criteria_object["target"]["text"],
-                         criteria_object["asked_property"]]
+    def analyse_text_criteria(self, model, criteria, metadata, text):
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return analyse_text_criteria_amazon(model, self.bedrock_client, system_prompt_text,
+                                                user_prompt_text, criteria, metadata, text, use_tool=True)
 
-            for constraint in criteria_object["constraints"]:
-                criterias.append(constraint['evidence'])
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return analyse_text_criteria_amazon(model, self.bedrock_client, system_prompt_text,
+                                                user_prompt_text, criteria, metadata, text, use_tool=False)
 
-            return criterias
+        elif model == "gpt-5.2":
+            return analyse_text_criteria_gpt(model, self.openai_client, system_prompt_text, user_prompt_text,
+                                             criteria, metadata, text)
 
-    def analyse_text_restricting_criteria(self, model, criteria, metadata, text):
-        if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_text
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt_text.format(metadata=metadata, text=text, criteria=criteria)
-                    }
-                ],
-                text_format=AnswerContainsCriteria,
-            )
+    def analyse_image_criteria(self, model, criteria, metadata, image_path):
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return analyse_image_criteria_amazon(model, self.bedrock_client, system_prompt_image,
+                                                 user_prompt_image_text, criteria, metadata, image_path, use_tool=True)
 
-            found = response.output_parsed
-            return found.answer
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return analyse_image_criteria_amazon(model, self.bedrock_client, system_prompt_image,
+                                                 user_prompt_image_text, criteria, metadata, image_path, use_tool=False)
 
-    def analyse_image_restricting_criteria(self, model, criteria, metadata, image_path):
-        if model == "gpt-5.2":
-            image64 = encode_image(
-                os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                             image_path))
-
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_image
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": user_prompt_image_text.format(metadata=metadata, criteria=criteria),
-                            },
-                            {
-                                "type": "input_image",
-                                "image_url": user_prompt_image_image.format(image64=image64),
-                            },
-                        ]
-                    }
-                ],
-                text_format=AnswerContainsCriteria,
-            )
-
-            found = response.output_parsed
-            return found.answer
+        elif model == "gpt-5.2":
+            return analyse_image_criteria_gpt(model, self.openai_client, system_prompt_image, user_prompt_image_text,
+                                              user_prompt_image_image, criteria, metadata, image_path)
 
     def table_general_understanding(self, model, table_title, table_name, columns):
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return table_general_understanding_amazon(model, self.bedrock_client, system_prompt_table,
+                                                      user_prompt_table, table_title, table_name, columns,
+                                                      use_tool=True)
+
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return table_general_understanding_amazon(model, self.bedrock_client, system_prompt_table,
+                                                      user_prompt_table, table_title, table_name, columns,
+                                                      use_tool=False)
 
         if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model=model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_table
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt_table.format(table_title=table_title,
-                                                            table_name=table_name,
-                                                            columns=columns)
-                    }
-                ],
-                text_format=TableDescription,
-            )
+            return table_general_understanding_gtp(model, self.openai_client, system_prompt_table, user_prompt_table,
+                                                   table_title, table_name, columns)
 
-            found = response.output_parsed
-            return found.description
+    def analyse_table_row_criteria(self, model, criteria, row):
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return analyse_table_row_criteria_amazon(model, self.bedrock_client, system_prompt_row, user_prompt_row,
+                                                     row, criteria, use_tool=True)
 
-        elif model == "claude-sonnet-4-5":
-            response = self.client.messages.create(
-                model=model,
-                system=system_prompt_table,
-                max_tokens=1024,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": user_prompt_table.format(table_title=table_title,
-                                                            table_name=table_name,
-                                                            columns=columns)
-                    }
-                ],
-                output_config={
-                    "format": {
-                        "type": "json_schema",
-                        "schema": json_schema_table_description
-                    }
-                }
-            )
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return analyse_table_row_criteria_amazon(model, self.bedrock_client, system_prompt_row, user_prompt_row,
+                                                     row, criteria, use_tool=False)
 
-            found = json.loads(response.content[0].text)
-            return found["description"]
-
-    def analyse_table_row_restricting_criteria(self, model, criteria, row):
         if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_row
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt_row.format(row=row, criteria=criteria)
-                    }
-                ],
-                text_format=AnswerContainsCriteria,
-            )
-
-            found = response.output_parsed
-            return found.answer
+            return analyse_table_row_criteria_gpt(model, self.openai_client, system_prompt_row, user_prompt_row, row,
+                                                  criteria)
 
     def create_unimodal_partitions(self, model, question, question_files, table_dir, modality, criterias, dataset,
                                    approach, setting):
@@ -406,8 +338,7 @@ class LEAgent:
             for image in image_set:
                 # print(f"Image: {image}")
                 metadata = image["title"]
-                answer = self.analyse_image_restricting_criteria(model, criteria, metadata, image["path"])
-                # answer = self.analyse_image(model, criteria, metadata, image)
+                answer = self.analyse_image_criteria(model, criteria, metadata, image["path"])
 
                 if answer.lower() == "yes":
                     correct_elements.append(image)
@@ -423,10 +354,8 @@ class LEAgent:
             correct_elements = []
             text_set = question_files['text_set']
             for text in text_set:
-                # print(f"Text: {text}")
                 metadata = text["title"]
-                answer = self.analyse_text_restricting_criteria(model, criteria, text["text"], metadata)
-                # answer = self.analyse_text(model, criteria, text["text"], metadata)
+                answer = self.analyse_text_criteria(model, criteria, text["text"], metadata)
 
                 if answer.lower() == "yes":
                     correct_elements.append(text)
@@ -461,10 +390,8 @@ class LEAgent:
             correct_elements = []
 
             for row in rows:
-                # print(f"Row: {row}")
-                answer = self.analyse_table_row_restricting_criteria(model, criteria, row)
+                answer = self.analyse_table_row_criteria(model, criteria, row)
 
-                # answer = self.analyse_table_row(model, criteria, row, table_title, table_description)
                 if answer.lower() == "yes":
                     correct_elements.append(row)
 
@@ -476,330 +403,188 @@ class LEAgent:
             partitions["table"].append(partition)
 
     def extract_restricting_criteria_text(self, model, question_text, title, text):
-        if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_restricting_text
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": user_restricting_text.format(question_text=question_text, title=title,
-                                                                     text=text)
-                            }
-                        ]
-                    }
-                ],
-                text_format=ParagraphExtraction,
-            )
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return extract_restricting_criteria_text_amazon(model, self.bedrock_client, system_restricting_text,
+                                                            user_restricting_text, question_text, title, text,
+                                                            use_tool=True)
 
-            bridge_element = response.output_parsed
-            print(bridge_element)
-            return bridge_element.evidence
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return extract_restricting_criteria_text_amazon(model, self.bedrock_client, system_restricting_text,
+                                                            user_restricting_text, question_text, title, text,
+                                                            use_tool=False)
+
+        if model == "gpt-5.2":
+            return extract_restricting_criteria_text_gpt(model, self.openai_client, system_restricting_text,
+                                                         user_restricting_text, question_text, title, text)
 
     def extract_restricting_criteria_image(self, model, question_text, image_title, image_path):
 
-        image64 = encode_image(
-            os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                         image_path))
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
 
-        if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_restricting_image
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": user_restricting_image_text.format(question_text=question_text,
-                                                                           image_title=image_title)
-                            },
-                            {
-                                "type": "input_image",
-                                "image_url": user_prompt_image_image.format(image64=image64)
-                            },
-                        ]
-                    }
-                ],
-                text_format=ImageExtraction,
-            )
+            return extract_restricting_criteria_image_amazon(model, self.bedrock_client, system_restricting_image,
+                                                             user_restricting_image_text, question_text, image_title,
+                                                             image_path, use_tool=True)
 
-            bridge_element = response.output_parsed
-            print(bridge_element)
-            return bridge_element.evidence
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return extract_restricting_criteria_image_amazon(model, self.bedrock_client, system_restricting_image,
+                                                             user_restricting_image_text, question_text, image_title,
+                                                             image_path, use_tool=False)
+
+        elif model == "gpt-5.2":
+            return extract_restricting_criteria_image_gpt(model, self.openai_client, system_restricting_image,
+                                                          user_restricting_image_text, user_prompt_image_image,
+                                                          question_text, image_title, image_path)
 
     def extract_restricting_criteria_table_row(self, model, question_text, document_title, table_name,
                                                table_description, table_row):
-        if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_restricting_table_row
-                    },
-                    {
-                        "role": "user",
-                        "content": user_restricting_table_row.format(question_text=question_text,
-                                                                     document_title=document_title,
-                                                                     table_name=table_name,
-                                                                     table_description=table_description,
-                                                                     table_row=table_row)
-                    },
-                ],
-                text_format=TableRowExtraction,
-            )
 
-            bridge_element = response.output_parsed
-            print(bridge_element)
-            return bridge_element.evidence
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return extract_restricting_criteria_table_row_amazon(model, self.bedrock_client,
+                                                                 system_restricting_table_row,
+                                                                 user_restricting_table_row, question_text,
+                                                                 document_title, table_name,
+                                                                 table_description, table_row, use_tool=True)
+
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return extract_restricting_criteria_table_row_amazon(model, self.bedrock_client,
+                                                                 system_restricting_table_row,
+                                                                 user_restricting_table_row, question_text,
+                                                                 document_title, table_name,
+                                                                 table_description, table_row, use_tool=False)
+
+        if model == "gpt-5.2":
+            return extract_restricting_criteria_table_row_gpt(model, self.openai_client, system_restricting_table_row,
+                                                              user_restricting_table_row, question_text, document_title,
+                                                              table_name, table_description, table_row)
 
     def analyse_text_bridge_element(self, model, question_text, criteria, title, text):
-        if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_text_bridge
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt_text_bridge.format(question_text=question_text, criteria=criteria,
-                                                                  title=title, text=text)
-                    }
-                ],
-                text_format=AnswerContainsCriteria,
-            )
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return analyse_text_bridge_element_amazon(model, self.bedrock_client, system_prompt_text_bridge,
+                                                      user_prompt_text_bridge, question_text, criteria, title, text,
+                                                      use_tool=True)
 
-            found = response.output_parsed
-            return found.answer
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return analyse_text_bridge_element_amazon(model, self.bedrock_client, system_prompt_text_bridge,
+                                                      user_prompt_text_bridge, question_text, criteria, title, text,
+                                                      use_tool=False)
+
+        if model == "gpt-5.2":
+            return analyse_text_bridge_element_gpt(model, self.openai_client, system_prompt_text_bridge,
+                                                   user_prompt_text_bridge, question_text, criteria, title, text)
 
     def analyse_image_bridge_element(self, model, question_text, criteria, image_title, image_path):
-        if model == "gpt-5.2":
-            image64 = encode_image(
-                os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                             image_path))
 
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_image_bridge
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": user_prompt_image_bridge_text.format(question_text=question_text,
-                                                                             criteria=criteria,
-                                                                             image_title=image_title)
-                            },
-                            {
-                                "type": "input_image",
-                                "image_url": user_prompt_image_image.format(image64=image64),
-                            },
-                        ]
-                    }
-                ],
-                text_format=AnswerContainsCriteria,
-            )
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return analyse_image_bridge_element_amazon(model, self.bedrock_client, system_prompt_image_bridge,
+                                                       user_prompt_image_bridge_text, question_text, criteria,
+                                                       image_title, image_path, use_tool=True)
 
-            found = response.output_parsed
-            return found.answer
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return analyse_image_bridge_element_amazon(model, self.bedrock_client, system_prompt_image_bridge,
+                                                       user_prompt_image_bridge_text, question_text, criteria,
+                                                       image_title, image_path, use_tool=False)
+
+        elif model == "gpt-5.2":
+            return analyse_image_bridge_element_gpt(model, self.openai_client, system_prompt_image_bridge,
+                                                    user_prompt_image_bridge_text, user_prompt_image_image,
+                                                    question_text, criteria, image_title, image_path)
 
     def analyse_table_row_bridge_criteria(self, model, question_text, criteria, table_row, table_name,
                                           table_description):
-        if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_row_bridge
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt_row_bridge.format(question_text=question_text, criteria=criteria,
-                                                                 table_name=table_name,
-                                                                 table_description=table_description,
-                                                                 table_row=table_row)
-                    }
-                ],
-                text_format=AnswerContainsCriteria,
-            )
 
-            found = response.output_parsed
-            return found.answer
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return analyse_table_row_bridge_criteria_amazon(model, self.bedrock_client, system_prompt_row_bridge,
+                                                            user_prompt_row_bridge, question_text, criteria, table_row,
+                                                            table_name, table_description, use_tool=True)
 
-    def analyse_text(self, model, criteria, paragraph, metadata):
-        """This method checks whether a text can be separated from the others based on a specific criteria."""
+        if model == "nvidia.nemotron-nano-12b-v2":
+            return analyse_table_row_bridge_criteria_amazon(model, self.bedrock_client, system_prompt_row_bridge,
+                                                            user_prompt_row_bridge, question_text, criteria, table_row,
+                                                            table_name, table_description, use_tool=False)
 
         if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_prompt_text
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt_text.format(metadata=metadata, criteria=criteria, paragraph=paragraph)
-                    }
-                ],
-                text_format=AnswerContainsCriteria,
-            )
-
-            found = response.output_parsed
-            return found.answer
-
-        elif model == "claude-sonnet-4-5":
-            response = self.client.messages.create(
-                model=model,
-                system=system_prompt_text,
-                max_tokens=1024,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": user_prompt_text.format(metadata=metadata, criteria=criteria, paragraph=paragraph)
-                    }
-                ],
-                output_config={
-                    "format": {
-                        "type": "json_schema",
-                        "schema": json_schema_check_criteria
-                    }
-                }
-            )
-            print(response.content[0].text)
-            found = json.loads(response.content[0].text)
-            return found["answer"]
+            return analyse_table_row_bridge_criteria_gpt(model, self.openai_client, system_prompt_row_bridge,
+                                                         user_prompt_row_bridge, question_text, criteria, table_row,
+                                                         table_name, table_description)
 
     def check_answer_in_paragraph(self, model, answer_class, question_text, paragraph_text, contextual_information):
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return check_answer_in_paragraph_amazon(model, self.bedrock_client, system_check_answer_text,
+                                                    user_check_answer_text, answer_class, question_text, paragraph_text,
+                                                    contextual_information, use_tool=True)
+
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return check_answer_in_paragraph_amazon(model, self.bedrock_client, system_check_answer_text,
+                                                    user_check_answer_text, answer_class, question_text, paragraph_text,
+                                                    contextual_information, use_tool=False)
 
         if model == "gpt-5.2":
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_check_answer_text
-                    },
-                    {
-                        "role": "user",
-                        "content": user_check_answer_text.format(question_text=question_text, answer_class=answer_class,
-                                                                 paragraph_text=paragraph_text,
-                                                                 contextual_information=contextual_information)
-                    }
-                ],
-                text_format=ParagraphContainsAnswer,
-            )
-
-            found = response.output_parsed
-            return found.contains, found.entity, found.confidence
+            return check_answer_in_paragraph_gpt(model, self.openai_client, system_check_answer_text,
+                                                 user_check_answer_text, answer_class, question_text, paragraph_text,
+                                                 contextual_information)
 
     def check_answer_image(self, model, answer_class_specific, answer_class_general, question_text,
-                           caption_text, image_input):
+                           caption_text, image_path):
 
-        if model == "gpt-5.2":
-            image64 = encode_image(
-                os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                             image_input))
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return check_answer_image_amazon(model, self.bedrock_client, system_check_answer_image,
+                                             user_check_answer_image,
+                                             answer_class_specific, answer_class_general, question_text,
+                                             caption_text, image_path, use_tool=True)
 
-            response = self.client.responses.parse(
-                model="gpt-5.2",
-                input=[
-                    {
-                        "role": "system",
-                        "content": system_check_answer_image
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": user_check_answer_image.format(question_text=question_text,
-                                                                       answer_class_specific=answer_class_specific,
-                                                                       answer_class_general=answer_class_general,
-                                                                       caption_text=caption_text)
-                            },
-                            {
-                                "type": "input_image",
-                                "image_url": user_prompt_image_image.format(image64=image64)
-                            },
-                        ],
-                    },
-                ],
-                text_format=ImageContainsAnswer,
-            )
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return check_answer_image_amazon(model, self.bedrock_client, system_check_answer_image,
+                                             user_check_answer_image,
+                                             answer_class_specific, answer_class_general, question_text,
+                                             caption_text, image_path, use_tool=False)
 
-            found = response.output_parsed
-            return found.contains, found.entity, found.match_level, found.confidence
+        elif model == "gpt-5.2":
+            return check_answer_image_gpt(model, self.openai_client, system_check_answer_image, user_check_answer_image,
+                                          user_prompt_image_image, answer_class_specific, answer_class_general,
+                                          question_text,
+                                          caption_text, image_path)
 
     def check_answer_in_row(self, model, answer_class_specific, row, question_text, table_description,
                             conditional_criteria):
 
-        print("Check it:")
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
+                model == "us.anthropic.claude-sonnet-4-6"):
+            return check_answer_in_row_amazon(model, self.bedrock_client, system_check_answer_row_cond_criteria,
+                                              user_check_answer_row_cond_criteria, system_check_answer_row,
+                                              user_check_answer_row,
+                                              answer_class_specific, row, question_text, table_description,
+                                              conditional_criteria, use_tool=True)
 
-        if conditional_criteria:
-            if model == "gpt-5.2":
-                response = self.client.responses.parse(
-                    model="gpt-5.2",
-                    input=[
-                        {
-                            "role": "system",
-                            "content": system_check_answer_row_cond_criteria
-                        },
-                        {
-                            "role": "user",
-                            "content": user_check_answer_row_cond_criteria.format(question_text=question_text,
-                                                                                  answer_class_specific=answer_class_specific,
-                                                                                  table_description=table_description,
-                                                                                  conditional_criteria=conditional_criteria,
-                                                                                  row=row)
-                        }
-                    ],
-                    text_format=RowContainsAnswer,
-                )
+        elif model == "nvidia.nemotron-nano-12b-v2":
+            return check_answer_in_row_amazon(model, self.bedrock_client, system_check_answer_row_cond_criteria,
+                                              user_check_answer_row_cond_criteria, system_check_answer_row,
+                                              user_check_answer_row,
+                                              answer_class_specific, row, question_text, table_description,
+                                              conditional_criteria, use_tool=False)
 
-                found = response.output_parsed
-                return found.contains, found.entity, found.confidence
-
-        else:
-            if model == "gpt-5.2":
-                response = self.client.responses.parse(
-                    model="gpt-5.2",
-                    input=[
-                        {
-                            "role": "system",
-                            "content": system_check_answer_row
-                        },
-                        {
-                            "role": "user",
-                            "content": user_check_answer_row.format(question_text=question_text,
-                                                                    answer_class_specific=answer_class_specific,
-                                                                    table_description=table_description,
-                                                                    row=row)
-                        }
-                    ],
-                    text_format=RowContainsAnswer,
-                )
-
-                found = response.output_parsed
-                return found.contains, found.entity, found.confidence
+        if model == "gpt-5.2":
+            return check_answer_in_row_gpt(model, self.openai_client, system_check_answer_row_cond_criteria,
+                                           user_check_answer_row_cond_criteria, system_check_answer_row,
+                                           user_check_answer_row,
+                                           answer_class_specific, row, question_text, table_description,
+                                           conditional_criteria)
 
     @staticmethod
     def extract_partitions(model, question, mod_chosen, question_text, partitions_path, dataset, approach, setting):
@@ -844,58 +629,6 @@ class LEAgent:
 
             return mod_chosen, partitions, min_le_filling, final_answer
 
-        """
-        if not mod_chosen:
-
-            average_le = average_modality_le(partitions)
-            filtered = {k: v for k, v in average_le.items() if v is not None}
-            max_value = max(filtered.values())
-            max_modalities = [k for k, v in filtered.items() if v == max_value]
-
-            print("Max modalities: ", max_modalities)
-
-            # The partition must bring the modality from which they were created.
-            fillings = [
-                {"modality": modality, "i": i, "filling": partition["splitting"]["filling"], "le": partition["le"],
-                 "criteria": partition["criteria"]} for modality in partitions.keys() for i, partition in
-                enumerate(partitions[modality]) if partition["le"] > 0]
-
-            final_answer = None
-
-            if not fillings:
-                return None, partitions, None, None
-
-            # Minimum logical entropy among those. Minimum filling length among those. Get ALL entries matching both
-            min_le = min(x["le"] for x in fillings)
-            min_filling_len = min(len(x["filling"]) for x in fillings if x["le"] == min_le)
-            min_le_filling = [x for x in fillings if x["le"] == min_le and len(x["filling"]) == min_filling_len]
-
-            # Count the amounts of criterias that where able to isolate the element in the set
-            criterias_filled = {}
-            for element in min_le_filling:
-                # Check if the elements fill considering the
-                criterias_filled[(element['i'], element['modality'])] = {"criterias_filled": 1,
-                                                                         "modality": element["modality"]}
-                for filling in fillings:
-                    if element["criteria"] != filling["criteria"]:
-                        for el in element["filling"]:
-                            if el in filling["filling"]:
-                                criterias_filled[(element["i"], element['modality'])]["criterias_filled"] += 1
-
-            if len(max_modalities) > 1:
-                print("the LLMs decides")
-                modality = self.decide_answer_modality(model, question_text, max_modalities)
-            else:
-                # Find the index that has the maximum number of criterias filled
-                print("The LLM does not decide")
-                modality = criterias_filled[max(criterias_filled,
-                                                key=lambda k: criterias_filled[k]['criterias_filled'])]["modality"]
-
-            print(f"Minimum modality: {modality}. Min le filling: {min_le_filling}.")
-
-            return modality, partitions, min_le_filling, final_answer
-        """
-
     def find_final_answer(self, model, question, question_text, answer_class_specific, answer_class_general,
                           answers_dir, modality, partitions, min_le_filling, iscomparison, num_elements):
 
@@ -903,8 +636,7 @@ class LEAgent:
 
         if not any(d.get("filling") for d in min_le_filling):
             print("Fillings are empty")
-            yesnoquestion, confidence = self.yesnoquestion(model, self.openai_client, self.bedrock_client,
-                                                           question_text)
+            yesnoquestion, confidence = self.yesnoquestion(model, question_text)
             print(yesnoquestion)
             if yesnoquestion:
                 final_answer = "no"
@@ -979,8 +711,7 @@ class LEAgent:
 
             print(f"Conditional criteria for answer: {conditional_criteria}")
 
-            yesnoquestion, confidence = self.yesnoquestion(model, self.openai_client, self.bedrock_client,
-                                                           question_text)
+            yesnoquestion, confidence = self.yesnoquestion(model, question_text)
             print(yesnoquestion)
             if yesnoquestion:
                 final_answer = "yes"
@@ -1137,15 +868,13 @@ class LEAgent:
                             for element in modality_set:
                                 answer = "no"
                                 if modality == "image":
-                                    answer = self.analyse_image_restricting_criteria(model,
-                                                                                     restricting_criterias,
-                                                                                     element["title"],
-                                                                                     element["path"])
+                                    answer = self.analyse_image_criteria(model, restricting_criterias, element["title"],
+                                                                         element["path"])
                                 elif modality == "text":
-                                    answer = self.analyse_text_restricting_criteria(model,
-                                                                                    restricting_criterias,
-                                                                                    element["title"],
-                                                                                    element["text"])
+                                    answer = self.analyse_text_criteria(model,
+                                                                        restricting_criterias,
+                                                                        element["title"],
+                                                                        element["text"])
                                 elif modality == "table":
                                     association_json = json.load(open(os.path.join(
                                         "/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/association",
@@ -1156,8 +885,8 @@ class LEAgent:
                                         os.path.join(
                                             "/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/tables",
                                             table["json"]), "rb"))
-                                    answer = self.analyse_table_row_restricting_criteria(model, restricting_criterias,
-                                                                                         element)
+                                    answer = self.analyse_table_row_criteria(model, restricting_criterias,
+                                                                             element)
 
                                 if answer.lower() == "yes":
                                     correct_elements.append(element)
@@ -2036,7 +1765,8 @@ class LEAgent:
                 print("We need to find another modality!")
                 if remaining_modalities:
                     if len(remaining_modalities) > 1:
-                        decided_modality = self.decide_modality_reduced_data(question_text,
+                        decided_modality = self.decide_modality_reduced_data(model,
+                                                                             question_text,
                                                                              remaining_modalities,
                                                                              question_files["image_set"],
                                                                              question_files["text_set"],
@@ -2138,14 +1868,12 @@ class LEAgent:
             print("*************************************************")
             print("Modality file already exists? NO. We create it")
             print("*************************************************\n")
-            priority_modalities = LEAgent.decide_modality_llm(model,
-                                                              self.openai_client,
-                                                              self.bedrock_client,
-                                                              question_data["question_text"],
-                                                              question_files["image_set"],
-                                                              question_files["text_set"],
-                                                              question_files["table_set"][0],
-                                                              table_dir, final_dataset_images).split('_')
+            priority_modalities = self.decide_modality_llm(model,
+                                                           question_data["question_text"],
+                                                           question_files["image_set"],
+                                                           question_files["text_set"],
+                                                           question_files["table_set"][0],
+                                                           table_dir, final_dataset_images).split('_')
 
             json.dump({"step_1": priority_modalities},
                       open(os.path.join(
@@ -2156,10 +1884,10 @@ class LEAgent:
 
         if len(priority_modalities) == 1:
             answer_class_specific, answer_class_general, rewritten_question_text, *criterias = self.read_criterias(
-                question, False)
+                question)
         else:
             answer_class_specific, answer_class_general, rewritten_question_text, *criterias = self.read_criterias(
-                question, False)
+                question)
 
         print("ANSWER CLASS - PRIORITY MODALITIES - CRITERIAS")
         print("*************************************************************************************")

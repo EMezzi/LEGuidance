@@ -1,3 +1,5 @@
+"""****TEXT****"""
+
 system_restricting_text = """You are a reasoning module for a multimodal question answering system.
 
 Your task is to extract relevant information from this PARAGRAPH in relation to the QUESTION received. 
@@ -31,6 +33,8 @@ PARAGRAPH:
 Provide the relevant information according to the instructions.
 """
 
+"""****IMAGE****"""
+
 system_restricting_image = """You are a reasoning module for a multimodal question answering system.
 
 Your task is to extract relevant information from this IMAGE in relation to the QUESTION received. 
@@ -61,9 +65,10 @@ IMAGE TITLE:
 Provide the relevant information according to the instructions.
 """
 
+"""****TABLE****"""
 system_restricting_table_row = """You are a reasoning module for a multimodal question answering system.
 
-Your task is to extract relevant information from this TABLE_ROW in relation to the QUESTION received. 
+Your task is to extract relevant information from this TABLE ROW in relation to the QUESTION received. 
 
 You are given: 
 - The QUESTION
@@ -76,7 +81,7 @@ Step 1 - Question analysis:
 - Given the QUESTION, the TABLE NAME, the TABLE DESCRIPTION, and the TABLE ROW check if the information in the TABLE ROW is related to the QUESTION
 
 Step 2 - Evidence extraction: 
-- If the TABLE ROW contains information related to the QUESTION, create a short textual description of the TABLE ROW taking into account the QUESTION. The description must be minimal and contain the entity/value that connects the TABLE_ROW to the QUESTION
+- If the TABLE ROW contains information related to the QUESTION, create a short textual description of the TABLE ROW taking into account the QUESTION. The description must be minimal and contain the entity/value that connects the TABLE ROW to the QUESTION
 
 Guidelines:
 - In the description only include information explicitly present in the table row.

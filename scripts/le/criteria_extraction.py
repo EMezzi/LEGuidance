@@ -7,240 +7,30 @@ import pickle as pk
 from collections import Counter
 
 from prompts.le.prompt_criteria_extraction import system_prompt_criteria, user_prompt_criteria
-from schemas.json_schemas import json_schema_extraction_criteria
-
-from typing import Literal, Optional, List
-from pydantic import BaseModel, Field
+from schemas.pydantic_schemas import *
 from dotenv import load_dotenv
-
-# ---- Enums / literals ----
-
-# AnswerType = Literal[
-#    "year", "date", "city", "state", "country", "person", "organization",
-#    "number", "percentage", "currency", "duration", "title", "other"
-# ]
-
-EntityType = Literal[
-    "person", "organization", "team", "award", "league", "event", "work", "place", "other"
-]
-
-ConstraintKind = Literal[
-    "relation",  # e.g., "played for", "won", "born in"
-    "award",  # award name constraint
-    "league",  # league/division constraint
-    "season",  # season constraint (if you also keep it as a constraint)
-    "time",  # time window constraint, non-season date/year too
-    "role",  # role/title constraint
-    "qualifier",  # "career statistics", "during", "when looking at", etc.
-    "domain",  # domain-specific context if needed
-    "other"
-]
-
-ConstraintTopic = Literal[
-    "Film",
-    "Transportation",
-    "Video games",
-    "Industry",
-    "Theater",
-    "Television",
-    "Music",
-    "Geography",
-    "Literature",
-    "History",
-    "Economy",
-    "Sports",
-    "Science",
-    "Politics",
-    "Buildings",
-    "Other"
-]
+from botocore.exceptions import ClientError
+from functions_extract_criterias import *
 
 
-# ---- Core models ----
+class CriteriasAgent:
+    def __init__(self, openai_client, bedrock_client, path_criterias, modalities):
+        self.openai_client = openai_client
+        self.bedrock_client = bedrock_client
+        self.path_criterias = path_criterias
+        self.modalities = modalities
 
+    def extract_criterias(self, model, question_text, question, criteria_extraction_dir, iteration):
+        # Add tho the prompt the generation of a set that contains the entire information brought by the sentence.
 
-class QuestionTopic(BaseModel):
-    question_topic: ConstraintTopic = Field(..., description="Topic of the question")
-
-
-class AnswerSubject(BaseModel):
-    expected_answer_type_specific: str = Field(..., description="Specific type of the expected answer")
-    expected_answer_type_general: str = Field(..., description="Generic type of the expected answer")
-
-
-class Target(BaseModel):
-    text: str = Field(..., description="Main entity the question is about.")
-    # type: #EntityType = Field(..., description="Type of the target entity.")
-    type: str = Field(default=None, description="Type of target entity.")
-
-
-class Constraint(BaseModel):
-    kind: ConstraintKind = Field(..., description="Constraint category.")
-    evidence: str = Field(..., description="Exact phrase from the question.")
-    normalized: str = Field(..., description="Cleaned/normalized version of evidence.")
-
-
-class TimeConstraint(BaseModel):
-    label: str = Field(..., description="Time phrase from the question (or normalized label).")
-    start_year: Optional[int] = None
-    end_year: Optional[int] = None
-    start_date: Optional[str] = Field(default=None, description="ISO-8601 if explicit (YYYY-MM-DD).")
-    end_date: Optional[str] = Field(default=None, description="ISO-8601 if explicit (YYYY-MM-DD).")
-
-
-class Alias(BaseModel):
-    text: str
-    reason: str  # "typo", "nickname", "alternative spelling", "abbreviation", ...
-
-
-class DistinctionCriteria(BaseModel):
-    topic: QuestionTopic
-    expected_answer_type: AnswerSubject
-    expected_cardinality: Literal["single", "multiple", "unknown"] = "single"
-
-    target: Target
-    asked_property: str = Field(..., description="Short predicate describing what is asked (e.g., 'team played for').")
-
-    constraints: List[Constraint] = Field(default_factory=list)
-    time_constraints: List[TimeConstraint] = Field(default_factory=list)
-    aliases: List[Alias] = Field(default_factory=list)
-
-    rewritten_question: str = Field(..., description="Minimal rewrite preserving meaning.")
-
-
-def save_json_file(json_object, file_name, question_text, criteria_extraction_dir, model, iteration):
-    os.makedirs(f"{criteria_extraction_dir}/{model}/iteration_{iteration}", exist_ok=True)
-    path = os.path.join(f"{criteria_extraction_dir}/{model}/iteration_{iteration}", file_name)
-
-    print(path)
-
-    # Ensure .json extension
-    if not path.endswith(".json"):
-        path += ".json"
-
-    # Case 1: Pydantic model -> dict
-    if hasattr(json_object, "model_dump"):
-        payload = json_object.model_dump()
-
-    # Case 2: String input (possibly JSON string)
-    elif isinstance(json_object, str):
-        try:
-            payload = json.loads(json_object)  # parse JSON string into dict/list
-        except json.JSONDecodeError:
-            # fallback: save as raw text inside JSON
-            payload = {"text": json_object}
-    else:
-        payload = json_object
-
-    # Add original question
-    if isinstance(payload, dict):
-        payload["original_question"] = question_text
-    else:
-        payload = {"data": payload, "original_question": question_text}
-
-    with open(path, "w", encoding="utf-8") as f:
-        print("Final dump")
-        json.dump(payload, f, ensure_ascii=False, indent=4)
-
-
-def extract_criterias(model, client, question_text, question, criteria_extraction_dir, iteration):
-    # Add tho the prompt the generation of a set that contains the entire information brought by the sentence.
-
-    if model == "gpt-5.2":
-        response = client.responses.parse(
-            model=model,
-            input=[
-                {
-                    "role": "system",
-                    "content": system_prompt_criteria
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt_criteria.format(question_text=question_text)
-                }
-            ],
-            text_format=DistinctionCriteria,
-        )
-
-        distinction_criterias = response.output_parsed
-        save_json_file(distinction_criterias, question, question_text, criteria_extraction_dir, model, iteration)
-
-    elif model == "claude-sonnet-4-5":
-        response = client.messages.create(
-            model=model,
-            max_tokens=1024,
-            system=system_prompt_criteria,
-            messages=[
-                {
-                    "role": "user",
-                    "content": user_prompt_criteria.format(question_text=question_text)
-                }
-            ],
-            output_config={
-                "format": {
-                    "type": "json_schema",
-                    "schema": json_schema_extraction_criteria
-                }
-            }
-        )
-
-        distinction_criterias = response.content[0].text
-        save_json_file(distinction_criterias, question, question_text, criteria_extraction_dir, model, iteration)
-
-    elif model == "deepseek-r1:8b":
-        """
-        configs = {
-            "max_tokens": 200,
-            "temperature": 0.0,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "personal_answer",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "country": {"type": "string"},
-                            "capital": {"type": "string"}
-                        },
-                        "required": ["country", "capital"],
-                        "additionalProperties": False
-                    }
-                }
-            }
-        }
-        """
-
-        configs = {
-            "max_tokens": 1000,
-            "temperature": 0.0,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "extracted_criterias",
-                    "schema": json_schema_extraction_criteria
-                }
-            }
-        }
-
-        print(user_prompt_criteria.format(question_text=question_text))
-
-        prompt_parameters = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt_criteria},
-                {"role": "user", "content": user_prompt_criteria.format(question_text=question_text)}
-            ],
-        }
-
-        prompt_parameters.update(configs)
-
-        response = client.chat.completions.create(**prompt_parameters)
-        distinction_criterias = response.choices[0].message.content
-
-        print(f"Response: {type(distinction_criterias), distinction_criterias}\n\n")
-        print(f"Usage stats: {response.usage}")
-
-        save_json_file(distinction_criterias, question, question_text, criteria_extraction_dir, model, iteration)
+        if model == "gpt-5.2":
+            extract_criterias_gpt(model, self.openai_client, question_text, question, criteria_extraction_dir,
+                                  iteration)
+        elif (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
+              model == "moonshotai.kimi-k2.5" or model == "nvidia.nemotron-nano-12b-v2" or
+              model == "qwen.qwen3-vl-235b-a22b" or model == "us.anthropic.claude-sonnet-4-6"):
+            extract_criterias_amazon(model, self.bedrock_client, question_text, question, criteria_extraction_dir,
+                                     iteration)
 
 
 def substitute(questions_multimodal_qa, criteria_extraction_dir, model, selected_files):
@@ -362,7 +152,7 @@ def select_questions(model, client):
         pk.dump(selected_questions, file)
 
 
-def extract_criterias_main(model, client):
+def extract_criterias_main(criterias_agent, model, client):
     load_dotenv()
 
     QUESTIONS_MULTIMODALQA_TRAINING = os.getenv("QUESTIONS_MULTIMODALQA_TRAINING")
@@ -384,14 +174,18 @@ def extract_criterias_main(model, client):
                     print("Present but with old features")
                     json_question = json.load(open(os.path.join(QUESTIONS_MULTIMODALQA_TRAINING, question), "rb"))
                     question_text = json_question["question"]
-                    extract_criterias(model, client, question_text, question, CRITERIA_EXTRACTION_DIR, iteration)
+                    criterias_agent.extract_criterias(model, client, question_text, question, CRITERIA_EXTRACTION_DIR,
+                                                      iteration)
             else:
                 print("Not present between criterias. So let's recompute it.")
                 json_question = json.load(open(os.path.join(QUESTIONS_MULTIMODALQA_TRAINING, question), "rb"))
                 question_text = json_question["question"]
-                extract_criterias(model, client, question_text, question, CRITERIA_EXTRACTION_DIR, iteration)
+                criterias_agent.extract_criterias(model, client, question_text, question, CRITERIA_EXTRACTION_DIR,
+                                                  iteration)
 
 
 if __name__ == "__main__":
-    random.seed(42)
-    select_questions("gpt-5.2", None)
+    # random.seed(42)
+    # select_questions("gpt-5.2", None)
+
+    print(criteria_tool)

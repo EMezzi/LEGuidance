@@ -1,56 +1,35 @@
-dp_prompt = """
+system_prompt_dp = """You are a multimodal QA assistant.
 
-images_text = "\n\n".join([
-    f"{i + 1}. Title: {img['title']}"
-    for i, img in enumerate(images)
-])
+Your task is to answer a QUESTION given three types of data sources: text paragraphs, images, and a table. 
 
-image_inputs = []
-for img in images:
-    image64 = encode_image(os.path.join(final_dataset_images, img["path"]))
-    image_inputs.append({
-        "title": img["title"],
-        "image_url": f"data:image/jpeg;base64,{image64}"
-    })
+You are given: 
+- The QUESTION
+- Text PARAGRAPHS
+- The IMAGES TITLES
+- The IMAGES
+- The TABLE
 
-paragraphs_text = "\n\n".join([
-    f"{i + 1}. Title: {p['title']}\nContent: {p['text']}"
-    for i, p in enumerate(texts)
-])
 
-json_table = json.load(open(os.path.join(table_dir, table["json"]), "rb"))
+Guidelines: 
+- Use uniquely the data that is offered. 
+- Do not rely on your knowledge.
+- Review each document, analyze the images, and the table and derive an answer based on the information contained across all sources. 
+- Aim to combine insights from PARAGRAPHS, IMAGES, and the TABLE and across modalities to deliver the most accurate response possible.
+- Return only the answer without explanations. 
+- If you do not find the necessary information, return None.
+"""
 
-tables_text = f"""
-    Table Title: {json_table["title"]}
-    Table name: {json_table["table"]["table_name"]}
-    Content: {json_table["table"]}
-    """
+user_prompt_dp = """QUESTION: 
+{question_text}
 
-response = self.client.responses.parse(
-    model="gpt-5.2",
-    input=[
-        {
-            "role": "system",
-            "content": system_prompt_modality
-        },
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": user_prompt_modality.format(question=question,
-                                                        images_text=images_text,
-                                                        paragraphs_text=paragraphs_text,
-                                                        tables_text=tables_text)
-                },
-                *[
-                    {"type": "input_image", "image_url": img["image_url"]} for img in image_inputs
-                ]
-            ]
-        }
-    ],
-    text_format=ModalityDecision,
-)
+IMAGES:
+{images_text}
 
-return response.output_parsed.modalities
+TEXT paragraphs:
+{paragraphs_text}
+
+TABLES:
+{tables_text}
+
+Return the answer to the QUESTION.
 """

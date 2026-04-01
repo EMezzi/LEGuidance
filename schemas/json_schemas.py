@@ -213,7 +213,6 @@ json_schema_check_criteria = {
     "required": ["answer"],
 }
 
-
 # TABLE DESCRIPTON JSON SCHEMA
 json_schema_table_description = {
     "type": "object",
@@ -244,3 +243,22 @@ json_schema_answer_set = {
     "required": ["answer_set"]
 }
 
+json_schema_DP = {
+    "type": "object",
+    "properties": {
+        "contains": {
+            "type": "boolean",
+            "description": "Whether the given data contains answer to the question"
+        },
+        "entity": {
+            "type": "string",
+            "description": "The answer to the question if present in the data, otherwise None"
+        },
+        "confidence": {
+            "type": "number",
+            "description": "Confidence level of the answer between (0 - 1)"
+        }
+    },
+    "required": ["contains", "entity", "confidence"],
+    "additionalProperties": False
+}
