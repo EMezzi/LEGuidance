@@ -12,8 +12,6 @@ We evaluate EDMR using both closed-source and open-source LLMs. Our method impro
 
 # Results
 
-![Results](figures/results.png)
-
 <table>
   <tr>
     <td align="center">
