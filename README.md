@@ -17,7 +17,7 @@ We evaluate EDMR using both closed-source and open-source LLMs. Our method impro
 <table>
   <tr>
     <td align="center">
-      <img src="figures/global_entropy_boxplot.png" width="400"><br>
+      <img src="figures/entropy_change.png" width="400"><br>
       <em>Entropy lowering when adding modality</em>
     </td>
     <td align="center">
