@@ -1,8 +1,9 @@
 import os
 import ast
-import boto3
 import random
 from dotenv import load_dotenv
+
+from openai import OpenAI
 
 from utils.utilities import get_questions, import_directories
 
@@ -10,15 +11,8 @@ from dp.direct_prompting import dp_main, DPAgent
 from cot.chain_of_thought import cot_main, CoTAgent
 from pp.planning_prompting import pp_main, PPAgent
 
-from le.criteria_extraction import CriteriasAgent, extract_criterias_main
+from le.criteria_extraction import CriteriasAgent
 from le.entropy_calculation import entropy_calculation_main, LEAgent
-
-
-def import_bedrock_credentials():
-    aws_access_key_id = os.getenv("aws_access_key_id")
-    aws_secret_access_key = os.getenv("aws_secret_access_key")
-
-    return aws_access_key_id, aws_secret_access_key
 
 
 if __name__ == "__main__":
@@ -26,12 +20,7 @@ if __name__ == "__main__":
     load_dotenv()
 
     dataset, setting = "multimodalqa", "validation"
-    models = ["global.amazon.nova-2-lite-v1:0",
-              "mistral.mistral-large-3-675b-instruct",
-              "moonshotai.kimi-k2.5",
-              "nvidia.nemotron-nano-12b-v2",
-              "qwen.qwen3-vl-235b-a22b",
-              "us.anthropic.claude-sonnet-4-6"]
+    models = ["gpt-5.2"]
 
     MODALITIES = ast.literal_eval(os.getenv("MODALITIES", "[]"))
     OPENAI_KEY = os.getenv("OPENAI_KEY")
@@ -39,14 +28,8 @@ if __name__ == "__main__":
     QUESTIONS_DIR, ASSOCIATION_DIR, TABLE_DIR, FINAL_DATASET_IMAGES, ANSWERS_DIR, CRITERIA_DIR = (None, None, None,
                                                                                                   None, None, None)
 
-    """Import access keys for amazon"""
-    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY = import_bedrock_credentials()
-    bedrock_client = boto3.client("bedrock-runtime",
-                                  region_name="us-west-2",
-                                  aws_access_key_id=AWS_ACCESS_KEY_ID,
-                                  aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
-
-    openai_client = None
+    openai_client = OpenAI(api_key=OPENAI_KEY)
+    bedrock_client = None
 
     approaches = ["dp", "pp", "cot", "le"]
 
@@ -95,7 +78,7 @@ if __name__ == "__main__":
             for model in models:
                 print(f"Model: {model}")
                 print("***********************************\n")
-                extract_criterias_main(c_agent, QUESTIONS_DIR, CRITERIA_DIR, model, questions_list)
+                # extract_criterias_main(c_agent, QUESTIONS_DIR, CRITERIA_DIR, model, questions_list)
 
                 agent = LEAgent(openai_client, bedrock_client, os.path.join(os.path.join(CRITERIA_DIR, model)))
                 entropy_calculation_main(model,
