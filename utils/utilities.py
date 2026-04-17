@@ -5,9 +5,9 @@ import base64
 import random
 import imghdr
 import pandas as pd
-from dotenv import load_dotenv
 
 """Function to build the dataset"""
+
 
 def dataset_build(dataset):
     image_rows = dataset[dataset["modality"].astype(str) == "['image']"].sample(20, random_state=42)
@@ -31,6 +31,7 @@ def dataset_build(dataset):
         .reset_index(drop=False)
 
     return test_dataset
+
 
 def import_directories(dataset, setting, approach):
     if dataset == "multimodalqa":
@@ -66,7 +67,6 @@ def import_directories(dataset, setting, approach):
 
 
 """Utils functions"""
-
 
 def get_image_format(image_path, image_bytes):
     detected_type = imghdr.what(None, h=image_bytes)
@@ -298,15 +298,3 @@ def save_json_file(json_object, file_name, question_text, criteria_extraction_di
     with open(path, "w", encoding="utf-8") as f:
         print("Final dump")
         json.dump(payload, f, ensure_ascii=False, indent=4)
-
-
-
-
-
-if __name__ == '__main__':
-    load_dotenv()
-
-    QUESTIONS_MULTIMODALQA_VALIDATION = os.getenv("QUESTIONS_MULTIMODALQA_VALIDATION")
-    ASSOCIATION_DIR_VALIDATION = os.getenv("ASSOCIATION_MULTIMODALQA_VALIDATION")
-
-    create_association_qa(QUESTIONS_MULTIMODALQA_VALIDATION, ASSOCIATION_DIR_VALIDATION)
