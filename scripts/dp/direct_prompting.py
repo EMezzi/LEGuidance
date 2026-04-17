@@ -4,7 +4,6 @@ from prompts.dp.direct_prompting import *
 from prompts.le.prompt_analyse_criteria import user_prompt_image_image
 from utils.utilities import get_question_data, get_question_files, encode_image, detect_media_type_from_bytes
 from schemas.pydantic_schemas import DPAnswer
-from schemas.json_schemas import json_schema_DP
 import base64
 
 from botocore.exceptions import ClientError
@@ -155,6 +154,7 @@ class DPAgent:
                 return None
 
         elif model == "gpt-5.2":
+            print("Perfetto gpt: dp")
             try:
                 response = self.openai_client.responses.parse(
                     model="gpt-5.2",
@@ -168,7 +168,8 @@ class DPAgent:
                             "content": [
                                 {
                                     "type": "input_text",
-                                    "text": user_prompt_dp.format(question_text=question_text, images_text=images_text,
+                                    "text": user_prompt_dp.format(question_text=question_text,
+                                                                  images_text=images_text,
                                                                   paragraphs_text=paragraphs_text,
                                                                   tables_text=tables_text)
 
@@ -189,7 +190,7 @@ class DPAgent:
 
                 print(response)
                 found = response.output_parsed
-                return found.entity
+                return {"contains": found.contains, "entity": found.entity, "confidence": found.confidence}
 
             except Exception as e:
                 print(f"Converse API Error for Qwen: {str(e)}")
@@ -550,14 +551,19 @@ def dp_main(model, dp_agent, questions_list, questions_dir, association_dir, tab
             print(f"Question text: {question_data['question_text']}")
             answer = dp_agent.dp_final_answer(
                 model, question_data["question_text"], paragraphs_text, images_text, images_inputs, tables_text)
+            print(answer)
 
             if answer is None:
+                print("ciao")
                 json.dump({'final_answer': None}, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"),
                           indent=4)
 
             elif isinstance(answer, list):
+                print("Ma si pazz")
                 if any(el is not None for el in answer):
                     json.dump(answer, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
+                else:
+                    json.dump({'final_answer': None}, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
             else:
                 print("Perfetto")
                 if answer is not None:

@@ -153,7 +153,7 @@ class CoTAgent:
                 return None
 
         elif model == "gpt-5.2":
-            print(f"C stamm: {model}")
+            print("Perfetto gpt cot")
             try:
                 response = self.openai_client.responses.parse(
                     model="gpt-5.2",
@@ -188,7 +188,8 @@ class CoTAgent:
 
                 print(response)
                 found = response.output_parsed
-                return found.entity
+                return {"contains": found.contains, "reasoning": found.reasoning, "entity": found.entity,
+                        "confidence": found.confidence}
 
             except Exception as e:
                 print(f"Converse API Error for Qwen: {str(e)}")
@@ -259,6 +260,7 @@ class CoTAgent:
 
                     # 6. Extract the Tool Use Output
                     output_message = response['output']['message']
+                    print(output_message)
 
                     for block in output_message.get('content', []):
                         if 'toolUse' in block:
@@ -563,8 +565,12 @@ def cot_main(model, cot_agent, questions_list, questions_dir, association_dir, t
                           indent=4)
 
             elif isinstance(answer, list):
+                print("Ma si pazz")
                 if any(el is not None for el in answer):
                     json.dump(answer, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
+                else:
+                    json.dump({'final_answer': None}, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
+
             else:
                 print("Perfetto")
                 if answer is not None:
