@@ -2,10 +2,55 @@ import os
 import json
 import time
 import base64
+import random
+import imghdr
 import pandas as pd
-import pickle as pk
+from dotenv import load_dotenv
+
+"""Function to build the dataset"""
+
+def dataset_build(dataset):
+    image_rows = dataset[dataset["modality"].astype(str) == "['image']"].sample(20, random_state=42)
+    text_rows = dataset[dataset["modality"].astype(str) == "['text']"].sample(20, random_state=42)
+    table_rows = dataset[dataset["modality"].astype(str) == "['table']"].sample(20, random_state=42)
+
+    image_text_rows = dataset[dataset["modality"].astype(str) == "['image', 'text']"].sample(20, random_state=42)
+    text_image_rows = dataset[dataset["modality"].astype(str) == "['text', 'image']"].sample(20, random_state=42)
+    image_table_rows = dataset[dataset["modality"].astype(str) == "['image', 'table']"].sample(20, random_state=42)
+    table_image_rows = dataset[dataset["modality"].astype(str) == "['table', 'image']"].sample(20, random_state=42)
+
+    text_table_rows = dataset[dataset["modality"].astype(str) == "['text', 'table']"].sample(20, random_state=42)
+    table_text_rows = dataset[dataset["modality"].astype(str) == "['table', 'text']"].sample(20, random_state=42)
+
+    table_table_rows = dataset[dataset["modality"].astype(str) == "['table', 'table']"].sample(20, random_state=42)
+
+    test_dataset = pd.concat(
+        [image_rows, text_rows, table_rows, image_text_rows, text_image_rows, image_table_rows, table_image_rows,
+         text_table_rows, table_text_rows, table_table_rows]) \
+        .sample(frac=1, random_state=42) \
+        .reset_index(drop=False)
+
+    return test_dataset
+
 
 """Utils functions"""
+
+
+def get_image_format(image_path, image_bytes):
+    detected_type = imghdr.what(None, h=image_bytes)
+
+    if detected_type:
+        # Bedrock expects 'jpeg', but imghdr might return 'jpg'
+        ext = detected_type.lower().replace('jpg', 'jpeg')
+    else:
+        # Fallback to filename extension ONLY if binary detection fails
+        ext = image_path.split('.')[-1].lower().replace('jpg', 'jpeg')
+
+    # 3. FINAL SAFETY CHECK
+    if ext not in ['png', 'jpeg', 'gif', 'webp']:
+        ext = 'png'  # Safe default
+
+    return ext
 
 
 def get_question_data(question_dir, question):
@@ -33,13 +78,13 @@ def make_hashable(obj):
 
 def detect_media_type_from_bytes(data: bytes) -> str:
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
+        return "png"
     if data.startswith(b"\xff\xd8"):
-        return "image/jpeg"
+        return "jpeg"
     if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
-        return "image/gif"
+        return "gif"
     if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
-        return "image/webp"
+        return "webp"
     raise ValueError("Unknown image format (not png/jpg/gif/webp)")
 
 
@@ -58,12 +103,21 @@ def get_question_files(association_dir, question):
     return {"image_set": image_set, "text_set": text_set, "table_set": table_set}
 
 
-def get_questions():
+def get_questions(questions_dir):
+    """
     dataset = pk.load(open("./modality_selection/tree_dataset.pkl", "rb"))
 
     questions_dataset = dataset_build(dataset)
     questions_list = questions_dataset.to_dict(orient="records")
-    questions_list = [question for question in questions_list if question["index"] in ['question_14103.json']]
+    questions_list = [question for question in questions_list]
+
+    return questions_list
+    """
+
+    random.seed(42)
+
+    questions = os.listdir(questions_dir)
+    questions_list = random.sample(questions, len(questions))
 
     return questions_list
 
@@ -84,6 +138,7 @@ def average_modality_le(partitions):
         if le_values:
             d[modality] = sum(le_values) / len(le_values)
         else:
+
             d[modality] = None
 
     return d
@@ -148,16 +203,16 @@ def create_connection(question, question_data, association_dir):
     start_time = time.time()
 
     all_data_json_object = json.load(
-        open("/Users/emanuelemezzi/PycharmProjects/multimodalqa/dataset/all_data.json", "rb"))
+        open("../dataset/all_data.json", "rb"))
 
-    table_set = create_table_set(question_data, all_data_json_object["table"])
-    print("Table set: ", table_set)
+    text_set = create_text_set(question_data, all_data_json_object["text"])
+    print("Text set: ", text_set)
 
     image_set = create_image_set(question_data, all_data_json_object["image"])
     print("Image set: ", image_set)
 
-    text_set = create_text_set(question_data, all_data_json_object["text"])
-    print("Text set: ", text_set)
+    table_set = create_table_set(question_data, all_data_json_object["table"])
+    print("Table set: ", table_set)
 
     print("--- %s seconds ---" % (time.time() - start_time))
 
@@ -169,36 +224,57 @@ def create_connection(question, question_data, association_dir):
 
 
 def create_association_qa(questions_dir, association_dir):
-    for question in sorted(os.listdir(questions_dir)):
+    print(len(os.listdir(questions_dir)))
+    for i, question in enumerate(sorted(os.listdir(questions_dir))):
         if question not in os.listdir(association_dir):
-            print("Question: ", question)
+            print(f"Question: {i}, {question}")
             question_data = get_question_data(questions_dir, question)
             print("Question data: ", question_data)
             create_connection(question, question_data, association_dir)
 
 
-"""Function to build the dataset"""
+def save_json_file(json_object, file_name, question_text, criteria_extraction_dir, model):
+    os.makedirs(f"{criteria_extraction_dir}/{model}/", exist_ok=True)
+    path = os.path.join(f"{criteria_extraction_dir}/{model}/", file_name)
+
+    print(path)
+
+    # Ensure .json extension
+    if not path.endswith(".json"):
+        path += ".json"
+
+    # Case 1: Pydantic model -> dict
+    if hasattr(json_object, "model_dump"):
+        payload = json_object.model_dump()
+
+    # Case 2: String input (possibly JSON string)
+    elif isinstance(json_object, str):
+        try:
+            payload = json.loads(json_object)  # parse JSON string into dict/list
+        except json.JSONDecodeError:
+            # fallback: save as raw text inside JSON
+            payload = {"text": json_object}
+    else:
+        payload = json_object
+
+    # Add original question
+    if isinstance(payload, dict):
+        payload["original_question"] = question_text
+    else:
+        payload = {"data": payload, "original_question": question_text}
+
+    with open(path, "w", encoding="utf-8") as f:
+        print("Final dump")
+        json.dump(payload, f, ensure_ascii=False, indent=4)
 
 
-def dataset_build(dataset):
-    image_rows = dataset[dataset["modality"].astype(str) == "['image']"].sample(20, random_state=42)
-    text_rows = dataset[dataset["modality"].astype(str) == "['text']"].sample(20, random_state=42)
-    table_rows = dataset[dataset["modality"].astype(str) == "['table']"].sample(20, random_state=42)
 
-    image_text_rows = dataset[dataset["modality"].astype(str) == "['image', 'text']"].sample(20, random_state=42)
-    text_image_rows = dataset[dataset["modality"].astype(str) == "['text', 'image']"].sample(20, random_state=42)
-    image_table_rows = dataset[dataset["modality"].astype(str) == "['image', 'table']"].sample(20, random_state=42)
-    table_image_rows = dataset[dataset["modality"].astype(str) == "['table', 'image']"].sample(20, random_state=42)
 
-    text_table_rows = dataset[dataset["modality"].astype(str) == "['text', 'table']"].sample(20, random_state=42)
-    table_text_rows = dataset[dataset["modality"].astype(str) == "['table', 'text']"].sample(20, random_state=42)
 
-    table_table_rows = dataset[dataset["modality"].astype(str) == "['table', 'table']"].sample(20, random_state=42)
+if __name__ == '__main__':
+    load_dotenv()
 
-    test_dataset = pd.concat(
-        [image_rows, text_rows, table_rows, image_text_rows, text_image_rows, image_table_rows, table_image_rows,
-         text_table_rows, table_text_rows, table_table_rows]) \
-        .sample(frac=1, random_state=42) \
-        .reset_index(drop=False)
+    QUESTIONS_MULTIMODALQA_VALIDATION = os.getenv("QUESTIONS_MULTIMODALQA_VALIDATION")
+    ASSOCIATION_DIR_VALIDATION = os.getenv("ASSOCIATION_MULTIMODALQA_VALIDATION")
 
-    return test_dataset
+    create_association_qa(QUESTIONS_MULTIMODALQA_VALIDATION, ASSOCIATION_DIR_VALIDATION)
