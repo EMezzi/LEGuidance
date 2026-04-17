@@ -3,6 +3,7 @@ import ast
 import random
 import argparse
 from dotenv import load_dotenv
+from utils.utilities import create_association_qa
 
 from openai import OpenAI
 import boto3
@@ -89,6 +90,7 @@ if __name__ == "__main__":
         if dataset == "multimodalqa":
             (IMAGE_DIR, TEXT_DIR, TABLE_DIR, FINAL_DATASET_IMAGES, ASSOCIATION_DIR, QUESTIONS_DIR, CRITERIA_DIR,
              ANSWERS_DIR) = import_directories(dataset, setting, approach)
+            create_association_qa(QUESTIONS_DIR, ASSOCIATION_DIR)
 
         else:
             QUESTIONS_DIR, IMAGE_DIR, CRITERIA_DIR, ANSWERS_DIR = import_directories(dataset, setting, approach)
