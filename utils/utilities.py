@@ -32,6 +32,38 @@ def dataset_build(dataset):
 
     return test_dataset
 
+def import_directories(dataset, setting, approach):
+    if dataset == "multimodalqa":
+        IMAGE_DIR = os.getenv("IMAGE_DIR")
+        TEXT_DIR = os.getenv("TEXT_DIR")
+        TABLE_DIR = os.getenv("TABLE_DIR")
+        FINAL_DATASET_IMAGES = os.getenv("FINAL_DATASET_IMAGES")
+
+        ASSOCIATION_DIR = os.getenv(f"ASSOCIATION_MULTIMODALQA_{setting.upper()}")
+        QUESTIONS_DIR = os.getenv(f"QUESTIONS_MULTIMODALQA_{setting.upper()}")
+        CRITERIA_DIR = os.getenv(f"CRITERIA_MULTIMODALQA_{setting.upper()}")
+
+        ANSWERS_DIR = "dp"
+        if approach == "dp":
+            ANSWERS_DIR = os.getenv(f"ANSWERS_MULTIMODALQA_VALIDATION_DP")
+        elif approach == "cot":
+            ANSWERS_DIR = os.getenv(f"ANSWERS_MULTIMODALQA_VALIDATION_COT")
+        elif approach == "pp":
+            ANSWERS_DIR = os.getenv(f"ANSWERS_MULTIMODALQA_VALIDATION_PP")
+        elif approach == "le":
+            ANSWERS_DIR = os.getenv(f"ANSWERS_MULTIMODALQA_{setting.upper()}")
+
+        return IMAGE_DIR, TEXT_DIR, TABLE_DIR, FINAL_DATASET_IMAGES, ASSOCIATION_DIR, QUESTIONS_DIR, CRITERIA_DIR, ANSWERS_DIR
+
+    elif dataset == "manymodalqa":
+        QUESTIONS_DIR = os.getenv(f"QUESTIONS_MANYMODALQA_{setting.upper()}")
+        IMAGE_DIR = os.getenv(f"QUESTIONS_MANYMODALQA_IMAGES")
+
+        CRITERIA_DIR = os.getenv(f"CRITERIA_MANYMODALQA_{setting.upper()}")
+        ANSWERS_DIR = os.getenv(f"ANSWERS_MANYMODALQA_{setting.upper()}")
+
+        return QUESTIONS_DIR, IMAGE_DIR, CRITERIA_DIR, ANSWERS_DIR
+
 
 """Utils functions"""
 
