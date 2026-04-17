@@ -174,6 +174,13 @@ class TableRowExtraction(BaseModel):
     )
 
 
+class ImageContainsAnswer(BaseModel):
+    contains: bool = Field(..., description="Whether the image describes an entity matching the expected answer type")
+    entity: str = Field(..., description="The answer for the question extracted from the image")
+    match_level: Literal["specific", "general", "none"]
+    confidence: float = Field(..., ge=0, le=1)
+
+
 class ParagraphContainsAnswer(BaseModel):
     contains: bool = Field(...,
                            description="Whether the paragraph contains an element matching the expected answer type")
@@ -186,13 +193,6 @@ class RowContainsAnswer(BaseModel):
     contains: bool = Field(..., description="Whether the row contains an element matching the expected answer type")
     entity: str = Field(...,
                         description="The exact text span from the row cell that matches the expected answer type, or NONE")
-    confidence: float = Field(..., ge=0, le=1)
-
-
-class ImageContainsAnswer(BaseModel):
-    contains: bool = Field(..., description="Whether the image describes an entity matching the expected answer type")
-    entity: str = Field(..., description="The answer for the question extracted from the image")
-    match_level: Literal["specific", "general", "none"]
     confidence: float = Field(..., ge=0, le=1)
 
 
