@@ -49,12 +49,12 @@ pip install -e .
 cp .env.example .env
 ```
 ### API KEYS
-`OPENAI_KEY`=your_openai_key_here
-`AWS_ACCESS_KEY_ID`=your_aws_key_here
+`OPENAI_KEY`=your_openai_key_here <br/>
+`AWS_ACCESS_KEY_ID`=your_aws_key_here <br/>
 `AWS_SECRET_ACCESS_KEY`=your_aws_secret_here
 
 ### PATHS
-`DATA_ROOT`=/path/to/datasets
+`DATA_ROOT`=/path/to/datasets <br/>
 `RESULTS_ROOT`=./results
 
 # Data Preprocessing
