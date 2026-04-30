@@ -17,7 +17,7 @@ def preprocess_questions():
                 object_image["json"] = json_image
                 new_dict["image"][object_image["id"]] = object_image
 
-            with open("../dataset/all_data.json", "w") as json_file:
+            with open("./dataset/all_data.json", "w") as json_file:
                 json.dump(new_dict, json_file, indent=4)
 
             print("Finish modality image")
@@ -30,7 +30,7 @@ def preprocess_questions():
                 object_text["json"] = json_text
                 new_dict["text"][object_text["id"]] = object_text
 
-            with open("../dataset/all_data.json", "w") as json_file:
+            with open("./dataset/all_data.json", "w") as json_file:
                 json.dump(new_dict, json_file, indent=4)
             print("Finish modality text")
 
@@ -42,7 +42,7 @@ def preprocess_questions():
                 object_table["json"] = json_table
                 new_dict["table"][object_table["id"]] = object_table
 
-            with open("../dataset/all_data.json", "w") as json_file:
+            with open("./dataset/all_data.json", "w") as json_file:
                 json.dump(new_dict, json_file, indent=4)
 
             print("Finish modality tables")
@@ -78,13 +78,13 @@ def separate_unimodal_multimodal():
 
     print(modality_question)
 
-    with open("../dataset/question_by_modality.json", "w") as json_file:
+    with open("./dataset/question_by_modality.json", "w") as json_file:
         json.dump(modality_question, json_file, indent=4)
 
 
 def unimodal_multimodal_statistics():
     questions_by_modality = json.load(
-        open("../dataset/question_by_modality.json", "rb"))
+        open("./dataset/question_by_modality.json", "rb"))
 
     # Unimodal vs multimodal
     total_unimodal = sum(len(v) for v in questions_by_modality["unimodal"].values())
@@ -120,7 +120,7 @@ def unimodal_multimodal_statistics():
 
     plt.xticks(rotation=30, ha="right")
 
-    plt.savefig("dataset_statistics.png", dpi=300)
+    plt.savefig("./figures/dataset_statistics.png", dpi=300)
     plt.show()
 
 

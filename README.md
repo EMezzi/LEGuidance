@@ -61,6 +61,11 @@ cp .env.example .env
 Before running experiments, you must preprocess the datasets to generate the required modality-specific files (text, images, tables).
 This step prepares the data in the format expected by the EDMA pipeline and for all other approaches (DP, CoT, PP).
 
+
+```bash
+python preprocess.py
+```
+
 ```bash
 python association_dir.py --dataset all --setting validation
 ```
