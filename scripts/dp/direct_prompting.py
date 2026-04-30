@@ -57,13 +57,14 @@ class DPAgent:
 
         image_inputs = []
         for img in images:
-            image64 = encode_image(os.path.join(final_dataset_images, img["path"]))
-            image_inputs.append({
-                "title": img["title"],
-                "image_url": f"{image64}",
-                "image_ext": detect_media_type_from_bytes(
-                    open(os.path.join(final_dataset_images, img["path"]), "rb").read())
-            })
+            if img['path'] != '':
+                image64 = encode_image(os.path.join(final_dataset_images, img["path"]))
+                image_inputs.append({
+                    "title": img["title"],
+                    "image_url": f"{image64}",
+                    "image_ext": detect_media_type_from_bytes(
+                        open(os.path.join(final_dataset_images, img["path"]), "rb").read())
+                })
 
         json_table = json.load(open(os.path.join(table_dir, table["json"]), "rb"))
 
@@ -75,12 +76,6 @@ class DPAgent:
         return paragraphs_text, images_text, image_inputs, tables_text
 
     def dp_final_answer(self, model, question_text, paragraphs_text, images_text, images_inputs, tables_text):
-
-        # print(f"Model: {model}")
-        # print(f"Question text: {question_text}")
-        # print(f"Paragraphgs: {paragraphs_text}")
-        # print(f"images inputs: {image_inputs}")
-        # print(f"Tables: {tables_text}")
 
         if model == "global.amazon.nova-2-lite-v1:0":
 
@@ -154,7 +149,6 @@ class DPAgent:
                 return None
 
         elif model == "gpt-5.2":
-            print("Perfetto gpt: dp")
             try:
                 response = self.openai_client.responses.parse(
                     model="gpt-5.2",
@@ -193,7 +187,7 @@ class DPAgent:
                 return {"contains": found.contains, "entity": found.entity, "confidence": found.confidence}
 
             except Exception as e:
-                print(f"Converse API Error for Qwen: {str(e)}")
+                print(f"API Error for GPT: {str(e)}")
                 return None
 
         elif model == "mistral.mistral-large-3-675b-instruct":
@@ -524,7 +518,7 @@ class DPAgent:
                 return None
 
 
-def dp_main(model, dp_agent, questions_list, questions_dir, association_dir, table_dir, final_dataset_images,
+def dp_main(dataset, model, dp_agent, questions_list, questions_dir, association_dir, table_dir, final_dataset_images,
             answers_dir):
     print(f"Questions dir: {questions_dir}")
 
@@ -534,38 +528,54 @@ def dp_main(model, dp_agent, questions_list, questions_dir, association_dir, tab
     for i, question in enumerate(questions_list):
         print(f"Question {i}: {question}")
         json_question = json.load(open(os.path.join(questions_dir, question), "rb"))
-        modalities = json_question["metadata"]["modalities"]
-        if len(modalities) == 1:
-            unimodal_multimodal = "/unimodal"
+
+        if dataset == "multimodalqa":
+            modalities = json_question["metadata"]["modalities"]
+            if len(modalities) == 1:
+                unimodal_multimodal = "/unimodal"
+            else:
+                unimodal_multimodal = "/multimodal"
+
         else:
             unimodal_multimodal = "/multimodal"
 
         if question not in os.listdir(answers_dir + unimodal_multimodal):
-            question_data = get_question_data(questions_dir, question)
-            question_files = get_question_files(association_dir, question)
+            if dataset == "multimodalqa":
+                question_data = get_question_data(questions_dir, question)
+                question_files = get_question_files(association_dir, question)
 
-            paragraphs_text, images_text, images_inputs, tables_text = DPAgent.data_preparation(
-                question_files["text_set"], question_files["image_set"], final_dataset_images,
-                question_files["table_set"][0], table_dir)
+                paragraphs_text, images_text, images_inputs, tables_text = DPAgent.data_preparation(
+                    question_files["text_set"], question_files["image_set"], final_dataset_images,
+                    question_files["table_set"][0], table_dir)
 
-            print(f"Question text: {question_data['question_text']}")
-            answer = dp_agent.dp_final_answer(
-                model, question_data["question_text"], paragraphs_text, images_text, images_inputs, tables_text)
-            print(answer)
+                print(f"Question text: {question_data['question_text']}")
+                answer = dp_agent.dp_final_answer(model, question_data["question_text"], paragraphs_text, images_text,
+                                                  images_inputs, tables_text)
+                print(answer)
+
+            elif dataset == "manymodalqa":
+                question_files = get_question_files(association_dir, question)
+                json_question = json.load(open(os.path.join(questions_dir, question), "rb"))
+
+                paragraphs_text, images_text, images_inputs, tables_text = DPAgent.data_preparation(
+                    question_files["text_set"], question_files["image_set"], final_dataset_images,
+                    question_files["table_set"][0], table_dir)
+
+                print(f"Question text: {json_question['question']}")
+                answer = dp_agent.dp_final_answer(model, json_question["question"], paragraphs_text, images_text,
+                                                  images_inputs, tables_text)
+                print(answer)
 
             if answer is None:
-                print("ciao")
                 json.dump({'final_answer': None}, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"),
                           indent=4)
 
             elif isinstance(answer, list):
-                print("Ma si pazz")
                 if any(el is not None for el in answer):
                     json.dump(answer, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
                 else:
-                    json.dump({'final_answer': None}, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
+                    json.dump({'final_answer': None},
+                              open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
             else:
-                print("Perfetto")
                 if answer is not None:
-                    print("Perfetto")
                     json.dump(answer, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
