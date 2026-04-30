@@ -131,14 +131,8 @@ if __name__ == "__main__":
 
     QUESTIONS_MULTIMODALQA_TRAINING = os.getenv("QUESTIONS_MULTIMODALQA_TRAINING")
 
-    IMAGE_DIR = os.getenv("IMAGE_DIR")
-    TEXT_DIR = os.getenv("TEXT_DIR")
-    TABLE_DIR = os.getenv("TABLE_DIR")
+    IMAGE_DIR = os.getenv("IMAGE_DIR_MULTIMODALQA")
+    TEXT_DIR = os.getenv("TEXT_DIR_MULTIMODALQA")
+    TABLE_DIR = os.getenv("TABLE_DIR_MULTIMODALQA")
 
-    # preprocess_questions()
-
-    """Separation of the sentences by modality"""
-    # separate_unimodal_multimodal()
-    # questions_by_modality = json.load(open("../dataset/question_by_modality.json", "rb"))
-
-    unimodal_multimodal_statistics()
+    preprocess_questions()
