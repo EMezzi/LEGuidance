@@ -2,7 +2,7 @@
 
 ![Methodology](figures/methodology_.png)
 
-EDMA is a novel methodology designed to improve Large Language Model reasoning capability in multimodal QA settings, where integration of information from multiple sources is required to correctly answer questions. 
+EDMA is a novel methodology designed to improve Large Language Model inference capability in multimodal QA settings, where integration of information from multiple sources is required to correctly answer questions. 
 
 EDMA is the first approach that quantifies and traces the contribution of each modality to the reduction of uncertainty over possible answer choices.
 
@@ -43,64 +43,64 @@ cd LEGuidance
 pip install -r requirements.txt
 pip install -e .
 ```
-2. Set up API keys and store environment variables in .env file
+2. Environment setup
 
-| Service     | Environment Variable    | Description                  | Example     |
-|-------------|-------------------------|------------------------------|-------------|
-| OpenAI      | `OPENAI_API_KEY`        | API key for OpenAI models    | `sk-...`    |
-| AWS Bedrock | `AWS_ACCESS_KEY_ID`     | AWS access key ID            | `AKIA...`   |
-| AWS Bedrock | `AWS_SECRET_ACCESS_KEY` | AWS secret access key        | `********`  |
-| AWS Bedrock | `AWS_DEFAULT_REGION`    | AWS region (e.g., us-east-1) | `us-east-1` |
+```bash
+cp .env.example .env
+```
+### API KEYS
+`OPENAI_KEY`=your_openai_key_here
+`AWS_ACCESS_KEY_ID`=your_aws_key_here
+`AWS_SECRET_ACCESS_KEY`=your_aws_secret_here
 
-3. Download the datasets MultimodalQA and ManymodalQA and set the paths
+### PATHS
+`DATA_ROOT`=/path/to/datasets
+`RESULTS_ROOT`=./results
 
-`DATA_ROOT`=/path/to/multimodalqa_files
+# Data Preprocessing
+Before running experiments, you must preprocess the datasets to generate the required modality-specific files (text, images, tables).
+This step prepares the data in the format expected by the EDMA pipeline and for all other approaches (DP, CoT, PP).
 
-`IMAGE_DIR`='$DATA_ROOT/images'
-`TEXT_DIR`='$DATA_ROOT/texts'
-`TABLE_DIR`='$DATA_ROOT/tables'
-`FINAL_DATASET_IMAGES`='$DATA_ROOT/final_dataset_images'
+```bash
+python association_dir.py --dataset all --setting validation
+```
 
-`ASSOCIATION_VALIDATION`='$DATA_ROOT/association_validation'
+| Argument    | Description           | Options                              | Default      |
+|-------------|-----------------------|--------------------------------------|--------------|
+| `--dataset` | Dataset to preprocess | `multimodalqa`, `manymodalqa`, `all` | **required** |
+| `--setting` | Dataset split         | `training`, `validation`             | `validation` |
 
-`CRITERIA_VALIDATION`='./results/multimodalqa/le/validation/criteria_extraction'
-`ANSWERS_VALIDATION`='./results/multimodalqa/le/validation/QA_Answers'
-
-`ANSWERS_VALIDATION_DP`='./results/multimodalqa/dp/validation/QA_Answers'
-`ANSWERS_VALIDATION_COT`='./results/multimodalqa/cot/validation/QA_Answers'
-`ANSWERS_VALIDATION_PP`='./results/multimodalqa/pp/validation/QA_Answers'
 
 # Use
 ▶️ Running Experiments
-The main script supports multiple datasets, models, and reasoning approaches.
+The main script supports multiple datasets, models, and approaches.
 Basic usage
 
-| Argument     | Description        | Options                        | Default        |
-|--------------|--------------------|--------------------------------|----------------|
-| `--dataset`  | Dataset to use     | `multimodalqa`, `manymodalqa`  | `multimodalqa` |
-| `--approach` | Reasoning method   | `dp`, `cot`, `pp`, `le`, `all` | `all`          |
-| `--models`   | Models to evaluate | list of model IDs              | `["gpt-5.2"]`  |
-| `--backend`  | API backend        | `openai`, `bedrock`            | `openai`       |
+| Argument     | Description                            | Options                        | Default        |
+|--------------|----------------------------------------|--------------------------------|----------------|
+| `--dataset`  | Dataset to use                         | `multimodalqa`, `manymodalqa`  | `multimodalqa` |
+| `--setting`  | Dataset split                          | `training`, `validation`       | `validation`   |
+| `--approach` | Inference approach                     | `dp`, `cot`, `pp`, `le`, `all` | `all`          |
+| `--models`   | Models to evaluate                     | list of model IDs              | `gpt-5.2`      |
+| `--backend`  | API backend                            | `openai`, `bedrock`            | `openai`       |
+| `--seed`     | Random seed for reproducibility        | int                            | `42`           |
+| `--limit`    | Limit number of questions (debug mode) | int                            | None           |
 
-
-```bash
-python main.py --dataset multimodalqa --setting validation --approach all
-```
 
 ## Examples
 Run all approaches with GPT-5.2:
 ```bash
-python main.py --models gpt-5.2
+python main.py --dataset multimodalqa --setting validation --approach all --models gpt-5.2 --seed 42
 ```
 Run only Chain-of-Thought:
 ```bash
-python main.py --approach cot
+python main.py --dataset multimodalqa --setting validation --approach cot --models gpt-5.2
 ```
-Run LE pipeline (criteria + entropy analysis):
+Run Logical Entropy pipeline:
 ```bash
-python main.py --approach le
+python main.py --dataset multimodalqa --setting validation --approach le --models gpt-5.2
 ```
 Run Bedrock models:
 ```bash
-python main.py --backend bedrock
+python main.py --dataset multimodalqa --setting validation --approach all --backend bedrock
 ```
