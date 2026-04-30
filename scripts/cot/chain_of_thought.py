@@ -61,13 +61,14 @@ class CoTAgent:
 
         image_inputs = []
         for img in images:
-            image64 = encode_image(os.path.join(final_dataset_images, img["path"]))
-            image_inputs.append({
-                "title": img["title"],
-                "image_url": f"{image64}",
-                "image_ext": detect_media_type_from_bytes(
-                    open(os.path.join(final_dataset_images, img["path"]), "rb").read())
-            })
+            if img['path'] != '':
+                image64 = encode_image(os.path.join(final_dataset_images, img["path"]))
+                image_inputs.append({
+                    "title": img["title"],
+                    "image_url": f"{image64}",
+                    "image_ext": detect_media_type_from_bytes(
+                        open(os.path.join(final_dataset_images, img["path"]), "rb").read())
+                })
 
         json_table = json.load(open(os.path.join(table_dir, table["json"]), "rb"))
 
@@ -81,7 +82,6 @@ class CoTAgent:
     def cot_final_answer(self, model, question_text, paragraphs_text, images_text, images_inputs, tables_text):
 
         if model == "global.amazon.nova-2-lite-v1:0":
-            print(f"C stamm: {model}")
 
             # 1. Prepare Content List for Nova
             # We combine the formatted text and the images into a single content list
@@ -153,7 +153,6 @@ class CoTAgent:
                 return None
 
         elif model == "gpt-5.2":
-            print("Perfetto gpt cot")
             try:
                 response = self.openai_client.responses.parse(
                     model="gpt-5.2",
@@ -186,7 +185,6 @@ class CoTAgent:
                     text_format=CoTAnswer,
                 )
 
-                print(response)
                 found = response.output_parsed
                 return {"contains": found.contains, "reasoning": found.reasoning, "entity": found.entity,
                         "confidence": found.confidence}
@@ -196,7 +194,6 @@ class CoTAgent:
                 return None
 
         elif model == "mistral.mistral-large-3-675b-instruct":
-            print(f"C stamm: {model}")
 
             responses = []
 
@@ -260,11 +257,9 @@ class CoTAgent:
 
                     # 6. Extract the Tool Use Output
                     output_message = response['output']['message']
-                    print(output_message)
 
                     for block in output_message.get('content', []):
                         if 'toolUse' in block:
-                            print(block['toolUse']['input'])
                             responses.append(block['toolUse']['input'])
                         else:
                             responses.append(output_message)
@@ -276,7 +271,6 @@ class CoTAgent:
             return responses
 
         elif model == "moonshotai.kimi-k2.5":
-            print(f"C stamm: {model}")
             try:
                 # 2. Format Content for Converse API
                 # The content list must strictly follow Bedrock's order/types
@@ -328,7 +322,6 @@ class CoTAgent:
 
                 # 5. Parse Tool Output
                 output_message = response['output']['message']
-                print(output_message)
 
                 # Look for the toolUse block in the response
                 for content_block in output_message.get('content', []):
@@ -342,7 +335,6 @@ class CoTAgent:
                 return None
 
         elif model == "nvidia.nemotron-nano-12b-v2":
-            print(f"C stamm: {model}")
             try:
                 content_list = []
 
@@ -404,8 +396,6 @@ class CoTAgent:
                 # 5. Extract and Parse Response
                 output_message = response['output']['message']
 
-                print(output_message)
-
                 return output_message
 
             except Exception as e:
@@ -413,7 +403,6 @@ class CoTAgent:
                 return None
 
         elif model == "qwen.qwen3-vl-235b-a22b":
-            print(f"C stamm: {model}")
             try:
                 # 1. Prepare User Prompt
                 prompt_text = user_prompt_cot.format(
@@ -458,8 +447,6 @@ class CoTAgent:
                 # 5. Extract the output
                 output_message = response['output']['message']
 
-                print(output_message)
-
                 # Search the content blocks for the tool call
                 for block in output_message.get('content', []):
                     if 'toolUse' in block:
@@ -472,7 +459,6 @@ class CoTAgent:
                 return None
 
         elif model == "us.anthropic.claude-sonnet-4-6":
-            print(f"C stamm: {model}")
             try:
                 # 2. Build the Content List
                 content_list = []
@@ -531,7 +517,7 @@ class CoTAgent:
                 return None
 
 
-def cot_main(model, cot_agent, questions_list, questions_dir, association_dir, table_dir, final_dataset_images,
+def cot_main(dataset, model, cot_agent, questions_list, questions_dir, association_dir, table_dir, final_dataset_images,
              answers_dir):
     print(f"Questions dir: {questions_dir}")
     print(f"WE ARE IN COT: {answers_dir}")
@@ -542,37 +528,54 @@ def cot_main(model, cot_agent, questions_list, questions_dir, association_dir, t
     for i, question in enumerate(questions_list):
         print(f"Question {i}: {question}")
         json_question = json.load(open(os.path.join(questions_dir, question), "rb"))
-        modalities = json_question["metadata"]["modalities"]
-        if len(modalities) == 1:
-            unimodal_multimodal = "/unimodal"
+
+        if dataset == "multimodalqa":
+            modalities = json_question["metadata"]["modalities"]
+            if len(modalities) == 1:
+                unimodal_multimodal = "/unimodal"
+            else:
+                unimodal_multimodal = "/multimodal"
+
         else:
             unimodal_multimodal = "/multimodal"
 
         if question not in os.listdir(answers_dir + unimodal_multimodal):
-            question_data = get_question_data(questions_dir, question)
-            question_files = get_question_files(association_dir, question)
+            if dataset == "multimodalqa":
+                question_data = get_question_data(questions_dir, question)
+                question_files = get_question_files(association_dir, question)
 
-            paragraphs_text, images_text, images_inputs, tables_text = CoTAgent.data_preparation(
-                question_files["text_set"], question_files["image_set"], final_dataset_images,
-                question_files["table_set"][0], table_dir)
+                paragraphs_text, images_text, images_inputs, tables_text = CoTAgent.data_preparation(
+                    question_files["text_set"], question_files["image_set"], final_dataset_images,
+                    question_files["table_set"][0], table_dir)
 
-            print(f"Question text: {question_data['question_text']}")
-            answer = cot_agent.cot_final_answer(
-                model, question_data["question_text"], paragraphs_text, images_text, images_inputs, tables_text)
+                print(f"Question text: {question_data['question_text']}")
+                answer = cot_agent.cot_final_answer(model, question_data["question_text"], paragraphs_text, images_text,
+                                                  images_inputs, tables_text)
+                print(answer)
+
+            elif dataset == "manymodalqa":
+                question_files = get_question_files(association_dir, question)
+                json_question = json.load(open(os.path.join(questions_dir, question), "rb"))
+
+                paragraphs_text, images_text, images_inputs, tables_text = CoTAgent.data_preparation(
+                    question_files["text_set"], question_files["image_set"], final_dataset_images,
+                    question_files["table_set"][0], table_dir)
+
+                print(f"Question text: {json_question['question']}")
+                answer = cot_agent.cot_final_answer(model, json_question["question"], paragraphs_text, images_text,
+                                                  images_inputs, tables_text)
+                print(answer)
 
             if answer is None:
                 json.dump({'final_answer': None}, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"),
                           indent=4)
 
             elif isinstance(answer, list):
-                print("Ma si pazz")
                 if any(el is not None for el in answer):
                     json.dump(answer, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
                 else:
                     json.dump({'final_answer': None}, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
 
             else:
-                print("Perfetto")
                 if answer is not None:
-                    print("Perfetto")
                     json.dump(answer, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
