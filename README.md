@@ -1,34 +1,37 @@
-# EDMR
+# EDMA
 
 ![Methodology](figures/methodology.png)
 
-EDMR is a novel methodology designed to improve Large Language Model reasoning capability in multimodal QA settings, where integration of information from multiple sources is required to correctly answer questions. 
+EDMA is a novel methodology designed to improve Large Language Model reasoning capability in multimodal QA settings, where integration of information from multiple sources is required to correctly answer questions. 
 
-EDMR is the first approach that quantifies and traces the contribution of each modality to the reduction of uncertainty over possible answer choices.
+EDMA is the first approach that quantifies and traces the contribution of each modality to the reduction of uncertainty over possible answer choices.
 
-We evaluate EDMR using both closed-source and open-source LLMs. Our method improves state-of-the-art performance, outperforming both specialised systems and existing prompting strategies.
+We evaluate EDMA using both closed-source and open-source LLMs. Our method improves state-of-the-art performance, outperforming both specialised systems and existing prompting strategies.
 
 ---
 
-# Results
+# Performance Results
 
-![Results](figures/results.png)
+![Results](figures/EDMA_vs_SOTA.png)
+![Results](figures/EDMA_vs_prompt.png)
 
+# Analysis of the Results
 <table>
   <tr>
     <td align="center">
       <img src="figures/entropy_change.png" width="400"><br>
-      <em>Entropy lowering when adding modality</em>
+      <em>Entropy decrease</em>
     </td>
     <td align="center">
       <img src="figures/boxplot_tp_fp.png" width="400"><br>
       <em>Entropy TP vs Entropy FP</em>
     </td>
+    <td align="center">
+      <img src="figures/interventions_graph.png" width="400"><br>
+      <em>FDR Across Entropy Levels</em>
+    </td>
   </tr>
 </table>
-
-
-
 
 ## 🚀 Installation
 
