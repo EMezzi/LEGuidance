@@ -34,39 +34,23 @@ def dataset_build(dataset):
 
 
 def import_directories(dataset, setting, approach):
-    if dataset == "multimodalqa":
-        IMAGE_DIR = os.getenv("IMAGE_DIR")
-        TEXT_DIR = os.getenv("TEXT_DIR")
-        TABLE_DIR = os.getenv("TABLE_DIR")
-        FINAL_DATASET_IMAGES = os.getenv("FINAL_DATASET_IMAGES")
+    IMAGE_DIR = os.getenv(f"IMAGE_DIR_{dataset.upper()}")
+    TEXT_DIR = os.getenv(f"TEXT_DIR_{dataset.upper()}")
+    TABLE_DIR = os.getenv(f"TABLE_DIR_{dataset.upper()}")
+    FINAL_DATASET_IMAGES = os.getenv(f"FINAL_DATASET_IMAGES_{dataset.upper()}")
 
-        ASSOCIATION_DIR = os.getenv(f"ASSOCIATION_MULTIMODALQA_{setting.upper()}")
-        QUESTIONS_DIR = os.getenv(f"QUESTIONS_MULTIMODALQA_{setting.upper()}")
-        CRITERIA_DIR = os.getenv(f"CRITERIA_MULTIMODALQA_{setting.upper()}")
+    ASSOCIATION_DIR = os.getenv(f"ASSOCIATION_{setting.upper()}_{dataset.upper()}")
+    QUESTIONS_DIR = os.getenv(f"QUESTIONS_{setting.upper()}_{dataset.upper()}")
+    CRITERIA_DIR = os.getenv(f"CRITERIA_{setting.upper()}_{dataset.upper()}")
 
-        ANSWERS_DIR = "dp"
-        if approach == "dp":
-            ANSWERS_DIR = os.getenv(f"ANSWERS_MULTIMODALQA_VALIDATION_DP")
-        elif approach == "cot":
-            ANSWERS_DIR = os.getenv(f"ANSWERS_MULTIMODALQA_VALIDATION_COT")
-        elif approach == "pp":
-            ANSWERS_DIR = os.getenv(f"ANSWERS_MULTIMODALQA_VALIDATION_PP")
-        elif approach == "le":
-            ANSWERS_DIR = os.getenv(f"ANSWERS_MULTIMODALQA_{setting.upper()}")
+    ANSWERS_DIR = os.getenv(f"ANSWERS_{setting.upper()}_{approach.upper()}_{dataset.upper()}")
 
-        return IMAGE_DIR, TEXT_DIR, TABLE_DIR, FINAL_DATASET_IMAGES, ASSOCIATION_DIR, QUESTIONS_DIR, CRITERIA_DIR, ANSWERS_DIR
-
-    elif dataset == "manymodalqa":
-        QUESTIONS_DIR = os.getenv(f"QUESTIONS_MANYMODALQA_{setting.upper()}")
-        IMAGE_DIR = os.getenv(f"QUESTIONS_MANYMODALQA_IMAGES")
-
-        CRITERIA_DIR = os.getenv(f"CRITERIA_MANYMODALQA_{setting.upper()}")
-        ANSWERS_DIR = os.getenv(f"ANSWERS_MANYMODALQA_{setting.upper()}")
-
-        return QUESTIONS_DIR, IMAGE_DIR, CRITERIA_DIR, ANSWERS_DIR
+    return (IMAGE_DIR, TEXT_DIR, TABLE_DIR, FINAL_DATASET_IMAGES, ASSOCIATION_DIR, QUESTIONS_DIR, CRITERIA_DIR,
+            ANSWERS_DIR)
 
 
 """Utils functions"""
+
 
 def get_image_format(image_path, image_bytes):
     detected_type = imghdr.what(None, h=image_bytes)
@@ -135,7 +119,7 @@ def get_question_files(association_dir, question):
     return {"image_set": image_set, "text_set": text_set, "table_set": table_set}
 
 
-def get_questions(questions_dir):
+def get_questions(dataset, questions_dir):
     """
     dataset = pk.load(open("./modality_selection/tree_dataset.pkl", "rb"))
 
@@ -146,12 +130,20 @@ def get_questions(questions_dir):
     return questions_list
     """
 
-    random.seed(42)
+    if dataset == "multimodalqa":
+        random.seed(42)
 
-    questions = os.listdir(questions_dir)
-    questions_list = random.sample(questions, len(questions))
+        questions = os.listdir(questions_dir)
+        questions_list = random.sample(questions, len(questions))
 
-    return questions_list
+        return questions_list
+
+    elif dataset == "manymodalqa":
+        random.seed(42)
+        questions = os.listdir(questions_dir)
+
+        questions_list = random.sample(questions, len(questions))
+        return questions_list
 
 
 def flatten_extend(matrix):
