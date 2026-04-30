@@ -65,13 +65,14 @@ class PPAgent:
 
         image_inputs = []
         for img in images:
-            image64 = encode_image(os.path.join(final_dataset_images, img["path"]))
-            image_inputs.append({
-                "title": img["title"],
-                "image_url": f"{image64}",
-                "image_ext": detect_media_type_from_bytes(
-                    open(os.path.join(final_dataset_images, img["path"]), "rb").read())
-            })
+            if img['path'] != '':
+                image64 = encode_image(os.path.join(final_dataset_images, img["path"]))
+                image_inputs.append({
+                    "title": img["title"],
+                    "image_url": f"{image64}",
+                    "image_ext": detect_media_type_from_bytes(
+                        open(os.path.join(final_dataset_images, img["path"]), "rb").read())
+                })
 
         json_table = json.load(open(os.path.join(table_dir, table["json"]), "rb"))
 
@@ -156,8 +157,6 @@ class PPAgent:
                 return None
 
         elif model == "gpt-5.2":
-            print(f"Perfetto gpt: planning prompting")
-
             try:
                 response = self.openai_client.responses.parse(
                     model="gpt-5.2",
@@ -190,7 +189,6 @@ class PPAgent:
                     text_format=PPAnswer,
                 )
 
-                print(response)
                 found = response.output_parsed
                 return {"contains": found.contains, "plan": found.plan, "execution": found.execution,
                         "entity": found.entity,
@@ -461,8 +459,6 @@ class PPAgent:
                 # 5. Extract the output
                 output_message = response['output']['message']
 
-                print(output_message)
-
                 # Search the content blocks for the tool call
                 for block in output_message.get('content', []):
                     if 'toolUse' in block:
@@ -534,7 +530,7 @@ class PPAgent:
                 return None
 
 
-def pp_main(model, pp_agent, questions_list, questions_dir, association_dir, table_dir, final_dataset_images,
+def pp_main(dataset, model, pp_agent, questions_list, questions_dir, association_dir, table_dir, final_dataset_images,
              answers_dir):
     print(f"Questions dir: {questions_dir}")
     print(f"WE ARE IN PP: {answers_dir}")
@@ -545,37 +541,54 @@ def pp_main(model, pp_agent, questions_list, questions_dir, association_dir, tab
     for i, question in enumerate(questions_list):
         print(f"Question {i}: {question}")
         json_question = json.load(open(os.path.join(questions_dir, question), "rb"))
-        modalities = json_question["metadata"]["modalities"]
-        if len(modalities) == 1:
-            unimodal_multimodal = "/unimodal"
+
+        if dataset == "multimodalqa":
+            modalities = json_question["metadata"]["modalities"]
+            if len(modalities) == 1:
+                unimodal_multimodal = "/unimodal"
+            else:
+                unimodal_multimodal = "/multimodal"
+
         else:
             unimodal_multimodal = "/multimodal"
 
         if question not in os.listdir(answers_dir + unimodal_multimodal):
-            question_data = get_question_data(questions_dir, question)
-            question_files = get_question_files(association_dir, question)
+            if dataset == "multimodalqa":
+                question_data = get_question_data(questions_dir, question)
+                question_files = get_question_files(association_dir, question)
 
-            paragraphs_text, images_text, images_inputs, tables_text = PPAgent.data_preparation(
-                question_files["text_set"], question_files["image_set"], final_dataset_images,
-                question_files["table_set"][0], table_dir)
+                paragraphs_text, images_text, images_inputs, tables_text = PPAgent.data_preparation(
+                    question_files["text_set"], question_files["image_set"], final_dataset_images,
+                    question_files["table_set"][0], table_dir)
 
-            print(f"Question text: {question_data['question_text']}")
-            answer = pp_agent.pp_final_answer(
-                model, question_data["question_text"], paragraphs_text, images_text, images_inputs, tables_text)
+                print(f"Question text: {question_data['question_text']}")
+                answer = pp_agent.pp_final_answer(model, question_data["question_text"], paragraphs_text, images_text,
+                                                  images_inputs, tables_text)
+                print(answer)
+
+            elif dataset == "manymodalqa":
+                question_files = get_question_files(association_dir, question)
+                json_question = json.load(open(os.path.join(questions_dir, question), "rb"))
+
+                paragraphs_text, images_text, images_inputs, tables_text = PPAgent.data_preparation(
+                    question_files["text_set"], question_files["image_set"], final_dataset_images,
+                    question_files["table_set"][0], table_dir)
+
+                print(f"Question text: {json_question['question']}")
+                answer = pp_agent.pp_final_answer(model, json_question["question"], paragraphs_text, images_text,
+                                                  images_inputs, tables_text)
+                print(answer)
 
             if answer is None:
                 json.dump({'final_answer': None}, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"),
                           indent=4)
 
             elif isinstance(answer, list):
-                print("Ma si pazz")
                 if any(el is not None for el in answer):
                     json.dump(answer, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
                 else:
                     json.dump({'final_answer': None}, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
 
             else:
-                print("Perfetto")
                 if answer is not None:
-                    print("Perfetto")
                     json.dump(answer, open(os.path.join(answers_dir + unimodal_multimodal, question), "w"), indent=4)
