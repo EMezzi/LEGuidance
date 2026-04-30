@@ -215,19 +215,20 @@ class LEAgent:
             return analyse_text_criteria_gpt(model, self.openai_client, system_prompt_text, user_prompt_text,
                                              criteria, metadata, text)
 
-    def analyse_image_criteria(self, model, criteria, metadata, image_path):
+    def analyse_image_criteria(self, dataset, model, criteria, metadata, image_path):
         if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
                 model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
                 model == "us.anthropic.claude-sonnet-4-6"):
-            return analyse_image_criteria_amazon(model, self.bedrock_client, system_prompt_image,
+            return analyse_image_criteria_amazon(dataset, model, self.bedrock_client, system_prompt_image,
                                                  user_prompt_image_text, criteria, metadata, image_path, use_tool=True)
 
         elif model == "nvidia.nemotron-nano-12b-v2":
-            return analyse_image_criteria_amazon(model, self.bedrock_client, system_prompt_image,
+            return analyse_image_criteria_amazon(dataset, model, self.bedrock_client, system_prompt_image,
                                                  user_prompt_image_text, criteria, metadata, image_path, use_tool=False)
 
         elif model == "gpt-5.2":
-            return analyse_image_criteria_gpt(model, self.openai_client, system_prompt_image, user_prompt_image_text,
+            return analyse_image_criteria_gpt(dataset, model, self.openai_client, system_prompt_image,
+                                              user_prompt_image_text,
                                               user_prompt_image_image, criteria, metadata, image_path)
 
     def table_general_understanding(self, model, table_title, table_name, columns):
@@ -280,7 +281,7 @@ class LEAgent:
 
         if modality not in filled_modalities:
             if modality == "image":
-                self.fill_criteria_images(model, criterias, question_files, partitions)
+                self.fill_criteria_images(dataset, model, criterias, question_files, partitions)
 
             elif modality == "text":
                 self.fill_criteria_text(model, criterias, question_files, partitions)
@@ -319,7 +320,7 @@ class LEAgent:
 
         return partition
 
-    def fill_criteria_images(self, model, criterias, question_files, partitions):
+    def fill_criteria_images(self, dataset, model, criterias, question_files, partitions):
         """This method checks whether the splitting is possible for each criterion for images."""
 
         for criteria in criterias:
@@ -329,7 +330,7 @@ class LEAgent:
             for image in image_set:
                 # print(f"Image: {image}")
                 metadata = image["title"]
-                answer = self.analyse_image_criteria(model, criteria, metadata, image["path"])
+                answer = self.analyse_image_criteria(dataset, model, criteria, metadata, image["path"])
 
                 if answer.lower() == "yes":
                     correct_elements.append(image)
@@ -370,7 +371,13 @@ class LEAgent:
         table_name = entire_table['table']['table_name']
 
         print("URL table: ", entire_table['url'])
-        table_columns = [element["column_name"] for element in entire_table["table"]["header"]]
+
+        try:
+            table_columns = [element["column_name"] for element in entire_table["table"]["header"]]
+        except Exception as e:
+            first_row = next(iter(question_files["table_set"][0].values()))[0]
+            table_columns = [cell["header"] for cell in first_row]
+
         rows = table[list(table.keys())[0]]
 
         table_description = self.table_general_understanding(model, table_title, table_name, table_columns)
@@ -410,23 +417,25 @@ class LEAgent:
             return extract_restricting_criteria_text_gpt(model, self.openai_client, system_restricting_text,
                                                          user_restricting_text, question_text, title, text)
 
-    def extract_restricting_criteria_image(self, model, question_text, image_title, image_path):
+    def extract_restricting_criteria_image(self, dataset, model, question_text, image_title, image_path):
 
         if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
                 model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
                 model == "us.anthropic.claude-sonnet-4-6"):
 
-            return extract_restricting_criteria_image_amazon(model, self.bedrock_client, system_restricting_image,
+            return extract_restricting_criteria_image_amazon(dataset, model, self.bedrock_client,
+                                                             system_restricting_image,
                                                              user_restricting_image_text, question_text, image_title,
                                                              image_path, use_tool=True)
 
         elif model == "nvidia.nemotron-nano-12b-v2":
-            return extract_restricting_criteria_image_amazon(model, self.bedrock_client, system_restricting_image,
+            return extract_restricting_criteria_image_amazon(dataset, model, self.bedrock_client,
+                                                             system_restricting_image,
                                                              user_restricting_image_text, question_text, image_title,
                                                              image_path, use_tool=False)
 
         elif model == "gpt-5.2":
-            return extract_restricting_criteria_image_gpt(model, self.openai_client, system_restricting_image,
+            return extract_restricting_criteria_image_gpt(dataset, model, self.openai_client, system_restricting_image,
                                                           user_restricting_image_text, user_prompt_image_image,
                                                           question_text, image_title, image_path)
 
@@ -471,22 +480,22 @@ class LEAgent:
             return analyse_text_bridge_element_gpt(model, self.openai_client, system_prompt_text_bridge,
                                                    user_prompt_text_bridge, question_text, criteria, title, text)
 
-    def analyse_image_bridge_element(self, model, question_text, criteria, image_title, image_path):
+    def analyse_image_bridge_element(self, dataset, model, question_text, criteria, image_title, image_path):
 
         if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
                 model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
                 model == "us.anthropic.claude-sonnet-4-6"):
-            return analyse_image_bridge_element_amazon(model, self.bedrock_client, system_prompt_image_bridge,
+            return analyse_image_bridge_element_amazon(dataset, model, self.bedrock_client, system_prompt_image_bridge,
                                                        user_prompt_image_bridge_text, question_text, criteria,
                                                        image_title, image_path, use_tool=True)
 
         elif model == "nvidia.nemotron-nano-12b-v2":
-            return analyse_image_bridge_element_amazon(model, self.bedrock_client, system_prompt_image_bridge,
+            return analyse_image_bridge_element_amazon(dataset, model, self.bedrock_client, system_prompt_image_bridge,
                                                        user_prompt_image_bridge_text, question_text, criteria,
                                                        image_title, image_path, use_tool=False)
 
         elif model == "gpt-5.2":
-            return analyse_image_bridge_element_gpt(model, self.openai_client, system_prompt_image_bridge,
+            return analyse_image_bridge_element_gpt(dataset, model, self.openai_client, system_prompt_image_bridge,
                                                     user_prompt_image_bridge_text, user_prompt_image_image,
                                                     question_text, criteria, image_title, image_path)
 
@@ -528,25 +537,25 @@ class LEAgent:
                                                  user_check_answer_text, answer_class, question_text, paragraph_text,
                                                  contextual_information)
 
-    def check_answer_image(self, model, answer_class_specific, answer_class_general, question_text,
+    def check_answer_image(self, dataset, model, answer_class_specific, answer_class_general, question_text,
                            caption_text, image_path):
 
-        if (model == "global.amazon.nova-2-lite-v1:0" or model == "mistral.mistral-large-3-675b-instruct" or
-                model == "moonshotai.kimi-k2.5" or model == "qwen.qwen3-vl-235b-a22b" or
-                model == "us.anthropic.claude-sonnet-4-6"):
-            return check_answer_image_amazon(model, self.bedrock_client, system_check_answer_image,
+        if (model == "global.amazon.nova-2-lite-v1:0" or model == "moonshotai.kimi-k2.5" or
+                model == "qwen.qwen3-vl-235b-a22b" or model == "us.anthropic.claude-sonnet-4-6"):
+            return check_answer_image_amazon(dataset, model, self.bedrock_client, system_check_answer_image,
                                              user_check_answer_image,
                                              answer_class_specific, answer_class_general, question_text,
                                              caption_text, image_path, use_tool=True)
 
         elif model == "nvidia.nemotron-nano-12b-v2":
-            return check_answer_image_amazon(model, self.bedrock_client, system_check_answer_image,
+            return check_answer_image_amazon(dataset, model, self.bedrock_client, system_check_answer_image,
                                              user_check_answer_image,
                                              answer_class_specific, answer_class_general, question_text,
                                              caption_text, image_path, use_tool=False)
 
         elif model == "gpt-5.2":
-            return check_answer_image_gpt(model, self.openai_client, system_check_answer_image, user_check_answer_image,
+            return check_answer_image_gpt(dataset, model, self.openai_client, system_check_answer_image,
+                                          user_check_answer_image,
                                           user_prompt_image_image, answer_class_specific, answer_class_general,
                                           question_text,
                                           caption_text, image_path)
@@ -588,14 +597,27 @@ class LEAgent:
                 f"../../results/{dataset}/{approach}/{setting}/partitions/{partitions_path}/{model}",
                 f"partitions_{question}"), "rb"))
 
+        if not mod_chosen:
+            modalities_json = json.load(
+                open(f"../../results/{dataset}/{approach}/{setting}/modalities_predicted/{model}/{question}", "rb"))
+
+            mod_chosen = modalities_json["step_1"][0]
+            print(f"Mod chosen is: {mod_chosen}")
+
         if mod_chosen:
             fillings = [
                 {"modality": mod_chosen, "i": i, "filling": partition["splitting"]["filling"], "le": partition["le"],
                  "criteria": partition["criteria"]} for i, partition in
                 enumerate(partitions[mod_chosen]) if partition["le"] > 0]
 
-            print("fillings are: ", fillings)
             final_answer = None
+
+            if not fillings:
+                fillings = [
+                    {"modality": mod_chosen, "i": i, "filling": partition["splitting"]["filling"],
+                     "le": partition["le"],
+                     "criteria": partition["criteria"]} for i, partition in
+                    enumerate(partitions[mod_chosen]) if partition["splitting"]["filling"]]
 
             if not fillings:
                 return None, partitions, None, None
@@ -621,7 +643,7 @@ class LEAgent:
 
             return mod_chosen, partitions, min_le_filling, final_answer
 
-    def find_final_answer(self, model, question, question_text, answer_class_specific, answer_class_general,
+    def find_final_answer(self, dataset, model, question, question_text, answer_class_specific, answer_class_general,
                           answers_dir, modality, partitions, min_le_filling, iscomparison, num_elements):
 
         print(f"The question text is: {question_text}")
@@ -644,7 +666,7 @@ class LEAgent:
             for filling in min_le_filling:
                 if filling['modality'] == modality:
                     for image in filling['filling']:
-                        semantic_checks.append(self.check_answer_image(model, answer_class_specific.lower(),
+                        semantic_checks.append(self.check_answer_image(dataset, model, answer_class_specific.lower(),
                                                                        answer_class_general.lower(),
                                                                        question_text, image['title'],
                                                                        image['path']))
@@ -795,6 +817,7 @@ class LEAgent:
 
                 elif modality == "image":
                     restricting_criterias = self.extract_restricting_criteria_image(
+                        dataset,
                         model,
                         question_text,
                         best_item["splitting"]["filling"]['title'],  # the filling items
@@ -849,7 +872,8 @@ class LEAgent:
                             for element in modality_set:
                                 answer = "no"
                                 if modality == "image":
-                                    answer = self.analyse_image_criteria(model, restricting_criterias, element["title"],
+                                    answer = self.analyse_image_criteria(dataset, model, restricting_criterias,
+                                                                         element["title"],
                                                                          element["path"])
                                 elif modality == "text":
                                     answer = self.analyse_text_criteria(model,
@@ -959,7 +983,7 @@ class LEAgent:
             # for filling in fillings_conditional_modality:
             for el_id in element_mapping.keys():
                 print(f"The element from which to extract the criteria is: {element_mapping[el_id]['el_filling']}")
-                restricting_criterias.append(self.extract_restricting_criteria_image(model, question_text,
+                restricting_criterias.append(self.extract_restricting_criteria_image(dataset, model, question_text,
                                                                                      element_mapping[el_id][
                                                                                          'el_filling'][
                                                                                          'title'],
@@ -1001,7 +1025,7 @@ class LEAgent:
 
         return restricting_criterias, old_criterias
 
-    def create_multi(self, model, question, question_text, multimodal_partitions, unimodal_partition,
+    def create_multi(self, dataset, model, question, question_text, multimodal_partitions, unimodal_partition,
                      conditional_modality, conditioned_modality, restricting_criterias):
 
         correct_elements = []
@@ -1010,7 +1034,8 @@ class LEAgent:
         for element in modality_set:
             answer = "no"
             if conditioned_modality == "image":
-                answer = self.analyse_image_bridge_element(model,
+                answer = self.analyse_image_bridge_element(dataset,
+                                                           model,
                                                            question_text,
                                                            restricting_criterias,
                                                            element["title"],
@@ -1025,13 +1050,13 @@ class LEAgent:
 
             elif conditioned_modality == "table":
                 association_json = json.load(open(
-                    os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/association_validation",
+                    os.path.join(f"/Users/emanuelemezzi/Desktop/datasetNIPS/{dataset}/association_validation",
                                  question),
                     "rb"))
                 table = association_json["table_set"][0].copy()
 
                 json_table = json.load(open(
-                    os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/tables", table["json"]),
+                    os.path.join(f"/Users/emanuelemezzi/Desktop/datasetNIPS/{dataset}/tables", table["json"]),
                     "rb"))
                 answer = self.analyse_table_row_bridge_criteria(model,
                                                                 question_text,
@@ -1114,7 +1139,8 @@ class LEAgent:
 
                             # print(f"The old restricting criterias are: {restricting_criterias}")
 
-                            self.create_multi(model, question, question_text, multimodal_partitions, unimodal_partition,
+                            self.create_multi(dataset, model, question, question_text, multimodal_partitions,
+                                              unimodal_partition,
                                               conditional_modality, conditioned_modality, restricting_criterias)
 
         return multimodal_partitions
@@ -1221,8 +1247,11 @@ class LEAgent:
             valid = {mod: val for mod, val in average_modality_le_unimodal.items() if
                      val is not None and modality_answers_given["unimodal_answers"].get(mod)}
 
-            min_mod = min(valid, key=valid.get)
-            return "unimodal_partitions", min_mod
+            try:
+                min_mod = min(valid, key=valid.get)
+                return "unimodal_partitions", min_mod
+            except Exception as e:
+                return "unimodal_partitions", None
 
         average_modality_le_multimodal = average_modality_le(multimodal_partitions)
 
@@ -1646,7 +1675,7 @@ class LEAgent:
                                                                                                         approach,
                                                                                                         setting)
 
-                        self.find_final_answer(model, question, rewritten_question_text, answer_class_specific,
+                        self.find_final_answer(dataset, model, question, rewritten_question_text, answer_class_specific,
                                                answer_class_general, answers_dir, "table",
                                                partitions, min_le_filling, False, 0)
 
@@ -1760,7 +1789,8 @@ class LEAgent:
 
             if final_answer is None:
                 print("Let's calculate the final answer")
-                final_answer = self.find_final_answer(model,
+                final_answer = self.find_final_answer(dataset,
+                                                      model,
                                                       question,
                                                       rewritten_question_text,
                                                       answer_class_specific,
@@ -1872,6 +1902,7 @@ class LEAgent:
 
     def answer_question(self, model, question, question_data, question_files, table_dir, final_dataset_images,
                         answers_dir, dataset, approach, setting):
+
         """Method which calls the other methods to calculate the final answer."""
         os.makedirs(f"../../results/{dataset}/{approach}/{setting}/modalities_predicted/{model}", exist_ok=True)
 
@@ -1952,25 +1983,32 @@ def answer_qa(model, agent, questions_list, questions_dir, association_dir, tabl
             continue
 
         json_question = json.load(open(os.path.join(questions_dir, question), "rb"))
-        modalities = json_question["metadata"]["modalities"]
 
-        if len(modalities) == 1:
-            unimodal_multimodal = "/unimodal/"
+        if dataset == "multimodalqa":
+            modalities = json_question["metadata"]["modalities"]
+            question_data = get_question_data(questions_dir, question)
+            print(f"Target modalities: {modalities}")
+
+            if len(modalities) == 1:
+                unimodal_multimodal = "/unimodal/"
+            else:
+                unimodal_multimodal = "/multimodal/"
+
         else:
             unimodal_multimodal = "/multimodal/"
+            question_data = {"question_text": json_question["question"]}
 
         # if question not in os.listdir(answers_dir + unimodal_multimodal):
         print("\nQUESTION JSON - QUESTION TEXT - TARGET MODALITIES")
         print("*************************************************************************************")
         print(f"Question text: {json_question['question']}")
-        print(f"Target modalities: {modalities}")
         print("*************************************************************************************\n")
-        question_data = get_question_data(questions_dir, question)
         question_files = get_question_files(association_dir, question)
 
-        try:
-            agent.answer_question(model, question, question_data, question_files, table_dir, final_dataset_images,
-                                  answers_dir + unimodal_multimodal, dataset, approach, setting)
+        agent.answer_question(model, question, question_data, question_files, table_dir, final_dataset_images,
+                              answers_dir + unimodal_multimodal, dataset, approach, setting)
+
+        """
         except Exception as e:
             print(f"The exception is: {e}")
             if str(e) == "min() arg is an empty sequence":
@@ -1979,6 +2017,7 @@ def answer_qa(model, agent, questions_list, questions_dir, association_dir, tabl
                     json.dump({"final_answer": "NONE", "motivation": str(e)}, f, indent=4)
 
             continue
+        """
 
 
 def entropy_calculation_main(model, agent, questions_list, questions_dir, association_dir, table_dir,

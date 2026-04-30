@@ -785,14 +785,13 @@ def isgraphical_gpt(model, openai_client, system_prompt_isgraphical_question, qu
 # └────────────────────────────────────────────────────────────────────────────┘
 
 
-def analyse_image_criteria_amazon(model, bedrock_client, system_prompt_image, user_prompt_image_text, criteria,
+def analyse_image_criteria_amazon(dataset, model, bedrock_client, system_prompt_image, user_prompt_image_text, criteria,
                                   metadata, image_path, use_tool=True):
     try:
         content_list = []
 
-        image64 = encode_image(
-            os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                         image_path))
+        image64 = encode_image(os.path.join(f"/Users/emanuelemezzi/Desktop/datasetNIPS/{dataset}/final_dataset_images",
+                                            image_path))
 
         # Strip the data URI header if it exists
         raw_b64 = image64
@@ -921,12 +920,12 @@ def analyse_image_criteria_amazon(model, bedrock_client, system_prompt_image, us
         return "yes"
 
 
-def analyse_image_criteria_gpt(model, openai_client,
+def analyse_image_criteria_gpt(dataset, model, openai_client,
                                system_prompt_image, user_prompt_image_text, user_prompt_image_image, criteria, metadata,
                                image_path):
-    image64 = encode_image(
-        os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                     image_path))
+
+    image64 = encode_image(os.path.join(f"/Users/emanuelemezzi/Desktop/datasetNIPS/{dataset}/final_dataset_images",
+                                        image_path))
 
     response = openai_client.responses.parse(
         model=model,
@@ -1555,15 +1554,14 @@ def extract_restricting_criteria_text_gpt(model, openai_client, system_restricti
 # │                          EXTRACT CRITERIA IMAGE                            │
 # └────────────────────────────────────────────────────────────────────────────┘
 
-def extract_restricting_criteria_image_amazon(model, bedrock_client, system_restricting_image,
+def extract_restricting_criteria_image_amazon(dataset, model, bedrock_client, system_restricting_image,
                                               user_restricting_image_text, question_text, image_title, image_path,
                                               use_tool=True):
     try:
         content_list = []
 
-        image64 = encode_image(
-            os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                         image_path))
+        image64 = encode_image(os.path.join(f"/Users/emanuelemezzi/Desktop/datasetNIPS/{dataset}/final_dataset_images",
+                                            image_path))
 
         # Strip the data URI header if it exists
         raw_b64 = image64
@@ -1686,12 +1684,12 @@ def extract_restricting_criteria_image_amazon(model, bedrock_client, system_rest
         return None
 
 
-def extract_restricting_criteria_image_gpt(model, openai_client, system_restricting_image,
+def extract_restricting_criteria_image_gpt(dataset, model, openai_client, system_restricting_image,
                                            user_restricting_image_text, user_prompt_image_image,
                                            question_text, image_title, image_path):
-    image64 = encode_image(
-        os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                     image_path))
+
+    image64 = encode_image(os.path.join(f"/Users/emanuelemezzi/Desktop/datasetNIPS/{dataset}/final_dataset_images",
+                                        image_path))
 
     response = openai_client.responses.parse(
         model=model,
@@ -1883,15 +1881,15 @@ def extract_restricting_criteria_table_row_gpt(model, openai_client, system_rest
 # │                          ANALYSE BRIDGE ELEMENT IMAGE                      │
 # └────────────────────────────────────────────────────────────────────────────┘
 
-def analyse_image_bridge_element_amazon(model, bedrock_client, system_prompt_image_bridge,
+def analyse_image_bridge_element_amazon(dataset, model, bedrock_client, system_prompt_image_bridge,
                                         user_prompt_image_bridge_text,
                                         question_text, criteria, image_title, image_path, use_tool=True):
     try:
         content_list = []
 
-        image64 = encode_image(
-            os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                         image_path))
+        image64 = encode_image(os.path.join(f"/Users/emanuelemezzi/Desktop/datasetNIPS/{dataset}/final_dataset_images",
+                                            image_path))
+
 
         # Strip the data URI header if it exists
         raw_b64 = image64
@@ -2022,11 +2020,11 @@ def analyse_image_bridge_element_amazon(model, bedrock_client, system_prompt_ima
         return "yes"
 
 
-def analyse_image_bridge_element_gpt(model, openai_client, system_prompt_image_bridge, user_prompt_image_bridge_text,
+def analyse_image_bridge_element_gpt(dataset, model, openai_client, system_prompt_image_bridge, user_prompt_image_bridge_text,
                                      user_prompt_image_image, question_text, criteria, image_title, image_path):
-    image64 = encode_image(
-        os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                     image_path))
+
+    image64 = encode_image(os.path.join(f"/Users/emanuelemezzi/Desktop/datasetNIPS/{dataset}/final_dataset_images",
+                                        image_path))
 
     response = openai_client.responses.parse(
         model=model,
@@ -2371,15 +2369,14 @@ def analyse_table_row_bridge_criteria_gpt(model, openai_client, system_prompt_ro
 # │                         CHECK ANSWER IN PARAGRAPH                          │
 # └────────────────────────────────────────────────────────────────────────────┘
 
-def check_answer_image_amazon(model, bedrock_client, system_check_answer_image, user_check_answer_image,
+def check_answer_image_amazon(dataset, model, bedrock_client, system_check_answer_image, user_check_answer_image,
                               answer_class_specific, answer_class_general, question_text,
                               caption_text, image_path, use_tool=True):
     try:
         content_list = []
 
-        image64 = encode_image(
-            os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                         image_path))
+        image64 = encode_image(os.path.join(f"/Users/emanuelemezzi/Desktop/datasetNIPS/{dataset}/final_dataset_images",
+                                            image_path))
 
         # Strip the data URI header if it exists
         raw_b64 = image64
@@ -2517,12 +2514,12 @@ def check_answer_image_amazon(model, bedrock_client, system_check_answer_image, 
         return False, "NONE", "NONE", 1.00
 
 
-def check_answer_image_gpt(model, openai_client, system_check_answer_image, user_check_answer_image,
+def check_answer_image_gpt(dataset, model, openai_client, system_check_answer_image, user_check_answer_image,
                            user_prompt_image_image, answer_class_specific, answer_class_general, question_text,
                            caption_text, image_path):
-    image64 = encode_image(
-        os.path.join("/Users/emanuelemezzi/Desktop/datasetNIPS/multimodalqa_files/final_dataset_images",
-                     image_path))
+
+    image64 = encode_image(os.path.join(f"/Users/emanuelemezzi/Desktop/datasetNIPS/{dataset}/final_dataset_images",
+                                        image_path))
 
     response = openai_client.responses.parse(
         model=model,
