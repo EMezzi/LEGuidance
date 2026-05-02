@@ -39,7 +39,7 @@ We evaluate EDMA using both closed-source and open-source LLMs. Our method impro
 
 ```bash
 git clone https://github.com/EMezzi/LEGuidance.git
-cd LEGuidance
+cd EDMA
 ```
 
 2. Create a python environment
