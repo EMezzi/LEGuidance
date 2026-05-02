@@ -17,6 +17,7 @@ The output must be EXACTLY ONE of the following labels:
 - image_text     (answer requires combining IMAGE + TEXT)
 - image_table    (answer requires combining IMAGE + TABLE)
 - text_table     (answer requires combining TEXT + TABLE)
+- text_table_image (answer requires combining TEXT + TABLE + IMAGE)
 
 Rules:
 - Use ONLY the provided data.
