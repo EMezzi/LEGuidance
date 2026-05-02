@@ -1,6 +1,6 @@
 # EDMA
 
-![Methodology](figures/methodology.png)
+![Methodology](figures/methodology_.png)
 
 EDMA is a novel methodology designed to improve the inference capabilities of Large Language Models in multimodal QA settings, where integration of information from multiple sources is required to correctly answer questions. 
 
