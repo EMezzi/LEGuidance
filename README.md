@@ -1,10 +1,10 @@
 # EDMA
 
-![Methodology](figures/methodology_.png)
+![Methodology](figures/methodology.png)
 
-EDMA is a novel methodology designed to improve Large Language Model inference capability in multimodal QA settings, where integration of information from multiple sources is required to correctly answer questions. 
+EDMA is a novel methodology designed to improve the inference capabilities of Large Language Models in multimodal QA settings, where integration of information from multiple sources is required to correctly answer questions. 
 
-EDMA is the first approach that quantifies and traces the contribution of each modality to the reduction of uncertainty over possible answer choices.
+EDMA explicitly quantifies and traces the contribution of each modality to the reduction of uncertainty over possible answer choices.
 
 We evaluate EDMA using both closed-source and open-source LLMs. Our method improves state-of-the-art performance, outperforming both specialised systems and existing prompting strategies.
 
@@ -35,19 +35,41 @@ We evaluate EDMA using both closed-source and open-source LLMs. Our method impro
 
 ## 🚀 Installation
 
-1. Clone the repository and install dependencies:
+1. Clone the repository:
 
 ```bash
 git clone https://github.com/EMezzi/LEGuidance.git
 cd LEGuidance
+```
+
+2. Create a python environment
+```bash
+python3.10 -m venv .venv
+```
+
+3. Activate the environment
+
+- **Linux / macOS**
+```bash
+source .venv/bin/activate
+```
+
+- **Windows**
+```bash
+.venv\Scripts\activate
+```
+
+4. Install dependencies
+```bash
 pip install -r requirements.txt
 pip install -e .
 ```
-2. Environment setup
 
+5. Environment set up
 ```bash
 cp .env.example .env
 ```
+
 ### API KEYS
 `OPENAI_KEY`=your_openai_key_here <br/>
 `AWS_ACCESS_KEY_ID`=your_aws_key_here <br/>
@@ -72,7 +94,7 @@ it replaces those IDs with the corresponding full object representations, so tha
 than just their IDs.
 
 ```bash
-python association_dir.py --dataset all --setting validation:
+python association_dir.py --dataset all --setting validation
 ```
 
 | Argument    | Description           | Options                              | Default      |
